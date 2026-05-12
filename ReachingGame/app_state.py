@@ -34,12 +34,17 @@ class AppState:
         self.env_rect_w        = None
         self.env_rect_h        = None
 
+        # Sensor origin offset in cm (set once when sensor is at desk bottom-left corner)
+        self.sensor_y_offset   = 0.0
+        self.sensor_z_offset   = 0.0
+
     _PERSIST_KEYS = (
         'WORKSPACE_Y_MIN', 'WORKSPACE_Y_MAX',
         'WORKSPACE_Z_MIN', 'WORKSPACE_Z_MAX',
         'env_mon_size', 'env_mon_unit', 'env_mon_ratio_idx',
         'env_desk_w', 'env_desk_h', 'env_desk_unit',
         'env_rect_x', 'env_rect_y', 'env_rect_w', 'env_rect_h',
+        'sensor_y_offset', 'sensor_z_offset',
     )
 
     def save_config(self):

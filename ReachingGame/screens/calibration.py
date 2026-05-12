@@ -605,7 +605,8 @@ class CalibrationScreen(QWidget):
         if s1 is None:
             self.canvas.update_s1(0, 0, False)
             return
-        y, z = s1.y * 2.54, s1.z * 2.54
+        y = s1.y * 2.54 - self.state.sensor_y_offset
+        z = s1.z * 2.54 - self.state.sensor_z_offset
         active = (0 <= y <= self.canvas._desk_w and
                   0 <= z <= self.canvas._desk_h)
         self.canvas.update_s1(y, z, active)
@@ -619,7 +620,8 @@ class CalibrationScreen(QWidget):
             s1 = self.liberty.get_sensor(1)
             if s1 is None:
                 return
-            y, z = s1.y * 2.54, s1.z * 2.54
+            y = s1.y * 2.54 - self.state.sensor_y_offset
+            z = s1.z * 2.54 - self.state.sensor_z_offset
             if self._phase == 'set_origin':
                 self.canvas.set_origin(y, z)
                 self._set_phase('measuring')

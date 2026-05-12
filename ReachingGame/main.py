@@ -45,7 +45,7 @@ class MainWindow(QMainWindow):
         self.screens      = {}
         self.game_windows = {}
         self._add('menu', MenuScreen(self.state, self.liberty, self, TASKS))
-        self._add('environment',  EnvironmentScreen(self.state, self))
+        self._add('environment',  EnvironmentScreen(self.state, self.liberty, self))
         self._add('calibration',  CalibrationScreen(self.state, self.liberty, self))
 
         for task in TASKS:

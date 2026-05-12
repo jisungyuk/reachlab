@@ -97,9 +97,9 @@ class GameScreen(QWidget):
         s = self.liberty.get_sensor(1)
         if s is None:
             return
-        y = s.y * 2.54
-        z = s.z * 2.54
         st = self.state
+        y = s.y * 2.54 - st.sensor_y_offset
+        z = s.z * 2.54 - st.sensor_z_offset
         self._cursor_in_ws = (st.WORKSPACE_Y_MIN <= y <= st.WORKSPACE_Y_MAX and
                               st.WORKSPACE_Z_MIN <= z <= st.WORKSPACE_Z_MAX)
         self._cursor_y = max(st.WORKSPACE_Y_MIN, min(st.WORKSPACE_Y_MAX, y))

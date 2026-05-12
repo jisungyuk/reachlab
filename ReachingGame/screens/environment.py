@@ -1,9 +1,11 @@
 import math
+import threading
+import winsound
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QDoubleSpinBox, QComboBox, QPushButton,
                              QSizePolicy, QFrame)
-from PyQt5.QtCore import Qt, QPointF, pyqtSignal
-from PyQt5.QtGui import QPainter, QColor, QBrush, QPen, QFont
+from PyQt5.QtCore import Qt, QPointF, QPoint, QTimer, pyqtSignal
+from PyQt5.QtGui import QPainter, QColor, QBrush, QPen, QFont, QPolygon
 
 ASPECT_RATIOS = [
     ('16:9',  16, 9),
@@ -96,7 +98,6 @@ class WorkspaceCanvas(QWidget):
         self._aspect = rw / max(rh, 0.001)
         self._rx     = rx
         self._ry     = ry
-        self._clamp()
         self.update()
         self._emit()
 
@@ -118,7 +119,6 @@ class WorkspaceCanvas(QWidget):
         self._rh = self._rw / max(self._aspect, 0.001)
         self._rx = cx - self._rw / 2
         self._ry = cy - self._rh / 2
-        self._clamp()
         self.update()
         self._emit()
 
@@ -171,6 +171,13 @@ class WorkspaceCanvas(QWidget):
         self._rx = max(0.0, min(self._rx, self._desk_w - self._rw))
         self._ry = max(0.0, min(self._ry, self._desk_h - self._rh))
 
+    def _clamp_pos_only(self):
+        # Clamp position only — never restricts size (used when dragging/moving an oversized rect)
+        if self._rw <= self._desk_w:
+            self._rx = max(0.0, min(self._rx, self._desk_w - self._rw))
+        if self._rh <= self._desk_h:
+            self._ry = max(0.0, min(self._ry, self._desk_h - self._rh))
+
     def _emit(self):
         self.changed.emit(self._rx, self._rx + self._rw,
                           self._ry, self._ry + self._rh)
@@ -221,6 +228,21 @@ class WorkspaceCanvas(QWidget):
         p.drawLine(int(mx + mw / 2), int(my), int(mx + mw / 2), int(my + mh))
         p.drawLine(int(mx), int(my + mh / 2), int(mx + mw), int(my + mh / 2))
 
+        # Player marker — top-center of desk
+        px_p, py_p = self._to_px(self._desk_w / 2, 0)
+        tri_size = 8
+        tri = QPolygon([
+            QPoint(int(px_p),            int(py_p) - 2),
+            QPoint(int(px_p) - tri_size, int(py_p) - 2 - tri_size * 2),
+            QPoint(int(px_p) + tri_size, int(py_p) - 2 - tri_size * 2),
+        ])
+        p.setBrush(QBrush(QColor(220, 60, 60)))
+        p.setPen(QPen(QColor(160, 30, 30), 1))
+        p.drawPolygon(tri)
+        p.setPen(QColor(160, 30, 30))
+        p.setFont(QFont('Arial', 11, QFont.Bold))
+        p.drawText(int(px_p) - 22, int(py_p) - 2 - tri_size * 2 - 4, "Player")
+
         # Resize handle (bottom-right)
         x1, y1, x2, y2 = self._handle_px()
         p.setBrush(QBrush(QColor(30, 90, 200)))
@@ -251,7 +273,7 @@ class WorkspaceCanvas(QWidget):
         else:
             super().keyPressEvent(e)
             return
-        self._clamp()
+        self._clamp_pos_only()
         self.update()
         self._emit()
 
@@ -275,7 +297,7 @@ class WorkspaceCanvas(QWidget):
             cx, cy = self._to_cm(px, py)
             self._rx = cx - self._drag_off.x()
             self._ry = cy - self._drag_off.y()
-            self._clamp()
+            self._clamp_pos_only()
             self.update()
             self._emit()
 
@@ -292,15 +314,19 @@ class WorkspaceCanvas(QWidget):
 
 
 class EnvironmentScreen(QWidget):
-    def __init__(self, state, main_window):
+    def __init__(self, state, liberty, main_window):
         super().__init__()
         self.setObjectName('EnvironmentScreen')
         self.setStyleSheet('#EnvironmentScreen { background-color: #f0f0f0; }')
-        self.state = state
-        self.mw    = main_window
+        self.state   = state
+        self.liberty = liberty
+        self.mw      = main_window
         self._ws        = (0.0, 59.8, 0.0, 33.6)
         self._mon_unit  = state.env_mon_unit
         self._desk_unit = state.env_desk_unit
+        self._origin_countdown = 0
+        self._origin_timer = QTimer(self)
+        self._origin_timer.timeout.connect(self._origin_tick)
         self._build()
 
     def _build(self):
@@ -461,6 +487,18 @@ class EnvironmentScreen(QWidget):
         apply_btn.setStyleSheet(BTN)
         apply_btn.clicked.connect(self._apply)
         bot.addWidget(apply_btn)
+        bot.addSpacing(24)
+
+        self.origin_btn = QPushButton("Set Origin")
+        self.origin_btn.setStyleSheet(BTN)
+        self.origin_btn.clicked.connect(self._start_origin)
+        bot.addWidget(self.origin_btn)
+        bot.addSpacing(8)
+        self.origin_lbl = QLabel(self._origin_text())
+        self.origin_lbl.setFont(QFont('Arial', 14))
+        self.origin_lbl.setStyleSheet("color: #555555;")
+        bot.addWidget(self.origin_lbl)
+
         root.addLayout(bot)
 
         self._on_update()
@@ -604,3 +642,35 @@ class EnvironmentScreen(QWidget):
         self.state.env_rect_w        = self.canvas._rw
         self.state.env_rect_h        = self.canvas._rh
         self.state.save_config()
+
+    def _origin_text(self):
+        y = self.state.sensor_y_offset
+        z = self.state.sensor_z_offset
+        if y == 0.0 and z == 0.0:
+            return "Origin: not set"
+        return f"Origin: Y {y:.1f} cm, Z {z:.1f} cm"
+
+    def _start_origin(self):
+        if self._origin_timer.isActive():
+            return
+        self._origin_countdown = 3
+        self.origin_btn.setEnabled(False)
+        self.origin_lbl.setText("3...")
+        self._origin_timer.start(1000)
+
+    def _origin_tick(self):
+        self._origin_countdown -= 1
+        if self._origin_countdown > 0:
+            self.origin_lbl.setText(f"{self._origin_countdown}...")
+            return
+        self._origin_timer.stop()
+        self.origin_btn.setEnabled(True)
+        s = self.liberty.get_sensor(1)
+        if s is None:
+            self.origin_lbl.setText("No sensor data")
+            return
+        self.state.sensor_y_offset = s.y * 2.54
+        self.state.sensor_z_offset = s.z * 2.54
+        self.state.save_config()
+        threading.Thread(target=winsound.Beep, args=(880, 120), daemon=True).start()
+        self.origin_lbl.setText(self._origin_text())
