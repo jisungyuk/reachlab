@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+
+# Virtual environments
+.venv/
+.venv312/
+venv/
+env/
+
+# Polhemus proprietary software (do not redistribute)
+LYHostSWCD-*/
+LYHostSWCD-*.zip
+LbtyUSBDrvPkgInstall*.exe
+
+# Claude settings
+.claude/
+
+# Calibration runtime data (user-specific)
+ReachingGame/last_calibration.json
+ReachingGame/config.json
+
+# Calibration output CSVs (raw experiment data)
+calibrated matrix/
+CalibrationRelated/calibration_*.csv
+CalibrationRelated/calibration_analysis.png
+
+# Test data folder
+test/
+
+# OS
+Thumbs.db
+.DS_Store
