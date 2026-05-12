@@ -218,7 +218,7 @@ class MenuScreen(QWidget):
             ('Start',        'start'),
             ('Environment',  'environment'),
             ('Calibration',  'calibration'),
-            ('Digitization', None),
+            ('Digitization', 'digitization'),
             ('Game',         None),
             ('Targets',      'targets'),
             ('Sessions',     'sessions'),
@@ -307,6 +307,9 @@ class MenuScreen(QWidget):
 
         elif key == 'calibration':
             self.mw.show_screen('calibration')
+
+        elif key == 'digitization':
+            self.mw.show_screen('digitization')
 
         elif key == 'targets':
             if task:

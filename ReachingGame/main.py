@@ -7,6 +7,7 @@ from liberty_reader import LibertyReader
 from screens.menu import MenuScreen
 from screens.environment import EnvironmentScreen
 from screens.calibration import CalibrationScreen
+from screens.digitization import DigitizationScreen
 
 import tasks.reaching_task as reaching_task
 
@@ -45,8 +46,9 @@ class MainWindow(QMainWindow):
         self.screens      = {}
         self.game_windows = {}
         self._add('menu', MenuScreen(self.state, self.liberty, self, TASKS))
-        self._add('environment',  EnvironmentScreen(self.state, self.liberty, self))
-        self._add('calibration',  CalibrationScreen(self.state, self.liberty, self))
+        self._add('environment',   EnvironmentScreen(self.state, self.liberty, self))
+        self._add('calibration',   CalibrationScreen(self.state, self.liberty, self))
+        self._add('digitization',  DigitizationScreen(self.state, self.liberty, self))
 
         for task in TASKS:
             for name, widget in task.build_screens(self, self.state).items():
