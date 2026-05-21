@@ -309,6 +309,10 @@ class MenuScreen(QWidget):
             self.mw.show_screen('calibration')
 
         elif key == 'digitization':
+            if not self.state.data_dir:
+                QMessageBox.warning(self, "No Folder Selected",
+                                    "Please select a data folder before accessing Digitization.")
+                return
             self.mw.show_screen('digitization')
 
         elif key == 'targets':

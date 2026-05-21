@@ -132,9 +132,103 @@
 
 ---
 
+---
+
+## 2026-05-12
+
+### GitHub
+- 프로젝트 전체 github.com/jisungyuk/reachlab (public)에 업로드
+
+### Environment Screen
+- Monitor zone을 책상 경계 밖으로 이동/확장 가능하게 변경 (Max Fit은 유지)
+- 드래그 시 size는 유지하고 position만 clamp (`_clamp_pos_only`)
+- 재시작 후 oversized rect 유지 (restore_rect에서 _clamp 호출 제거)
+- Player 마커 추가: 책상 상단 중앙에 빨간 삼각형 + "Player" 라벨
+
+### Sensor Origin Offset
+- Environment 화면에 "Set Origin" 버튼 추가 (S1 기준, 3초 카운트다운 + 비프음)
+- `sensor_y_offset`, `sensor_z_offset` config.json에 저장/복원
+- 현재 설정된 origin 값 라벨로 상시 표시
+- 게임/캘리브레이션/digitization 모든 센서 읽기에 offset 적용
+
+### Digitization Screen — 전체 구현
+- **app_state.py**: 모드별 필드 정리; dig 관련 필드는 config 비저장 (매 실행 시 초기화)
+- **digitizer.py** 신규: `rotation_matrix`, `compute_offset`, `finalize_forearm`, `track_mcp`
+- **Mode 0 (Cursor)**: Right/Left hand 센서 지정 드롭다운
+- **Mode 1 (MCP)**:
+  - Sensor Assignment (Right/Left/Pointer), 상호 배타 (pointer 제외)
+  - 즉시 기록 + 비프 (카운트다운 없음)
+  - 단축키: `1` = Right MCP, `F1` = Left MCP
+  - 자동저장: `data_dir/digitization_mode1.json` (매 기록 후)
+  - Save / Load 버튼
+  - Live MCP Position 실시간 추적
+- **Mode 2 (Wrist)**: 4 센서 지정, 10 landmark record + Finalize Right Forearm
+- 공통: S1–S4 항상 표시, 지정 센서 초록 / 비지정 회색, 드롭다운 변경 시 실시간 색 반영
+
+### Digitization — Mode 선택 UX
+- Apply 버튼으로 모드 확정; 옆에 "Current: Mode X" 표시
+- 첫 진입 시 Mode 0 자동 적용; Apply 후 프로그램 내 재진입 시 그 모드 유지
+- data_dir 미설정 시 Digitization 진입 차단 (경고 다이얼로그)
+
+### Digitization Canvas (Mode 0 / 1)
+- 상단 뷰 (Y = 좌우, Z 반전으로 플레이어 = 아래, 모니터 = 위)
+- Monitor rect 중심으로 뷰 정렬, monitor rect 기준 스케일
+- Right = 빨강, Left = 파랑; 센서 도트 + MCP 도트 + 연결선
+
+---
+
+## 2026-05-13
+
+### Digitization Canvas — Scale Fix
+- 캔버스 배율을 auto-fit에서 실제 크기의 30%로 변경
+- `_VIEW_RATIO = 0.30` 상수 도입; `env_mon_size` + `env_mon_ratio_idx` + `QScreen` 픽셀 너비로 px/cm 동적 계산
+- 모니터 설정이 바뀌면 배율 자동 재계산 (하드코딩 없음)
+
+### Digitization Mode 2 (Wrist) — Frame 수정
+- RSP/USP 기록 기준을 Hand 센서 → **Forearm 센서**로 변경 (왼쪽/오른쪽 모두)
+- MCP만 Hand 센서 기준, 나머지 RSP/USP/ME/LE 전부 Forearm 센서 기준
+- Finalize(키 6) 대상: ME/LE → **RSP/USP/ME/LE 전부** R.Forearm으로 변환
+- 프레임 라벨 텍스트 수정: RSP/USP는 항상 Forearm frame 표시
+- Finalize 후 스크롤 위치 유지: `_rebuild_content()` 제거 → status label 직접 업데이트
+
+### Digitization Mode 3 (Full Arm) — 전체 구현
+- **센서 배치**: L.Forearm, R.Forearm, L.UpperArm, R.Ptr(→R.UpperArm)
+- **랜드마크**: MCP, RSP, USP (Forearm 기준) / ME, LE, AP (UpperArm 기준)
+- **왼쪽**: 즉시 Forearm/UpperArm 센서 기준으로 저장
+- **오른쪽**: MCP/RSP/USP → R.Forearm 즉시 저장; ME/LE/AP → `_arm_R_tmp` 임시 저장 후 키 7(Finalize)로 R.UpperArm 변환
+- **단축키**: 1–6/F1–F6 랜드마크, 7 = Finalize Right Upper Arm
+- **캔버스**: 4센서 표시 + 랜드마크 도트 + 연결선 + skeleton (forearm→wrist joint→elbow joint→AP)
+- **저장**: `digitization_mode3.json`
+- `app_state.py`에 Mode 3 전용 필드 추가 (`arm_sensor_*`, `arm_L/R_*`)
+
+### Digitization UX 개선
+- Finalize 완료음: 단음 비프 → C 장조 아르페지오 (도미솔도, ~0.5초)
+- Mode 1 캔버스에 Pointer 센서 회색 점으로 표시
+
+---
+
+## 2026-05-20
+
+### Digitization Mode 4 (Full Single Arm) — Full Implementation
+
+- **app_state.py**: Mode 4 fields already added in previous session (`arm4_sensor_*`, `arm4_MCP/USP/RSP/LE/ME/AP/AP_opp`)
+- **digitization.py** — complete Mode 4 implementation:
+  - Added `ARM4_LANDMARKS`, `ARM4_LM_FULL`, `_ARM4_LM_IDX` constants
+  - Added `Full Single Arm (Mode 4)` entry to MODES dropdown
+  - `__init__`: `_arm4_status_lbls`, `_arm4_tmp` dicts; `_sc8` shortcut (key 8 = Finalize Trunk); `_sc7` re-routed to new `_shortcut_key7`
+  - `_on_apply`: Mode 4 disables Both option in hand combo, defaults to Right; re-enables Both when switching to other modes
+  - `_mcp_field`: mode 4 returns `arm4_MCP`
+  - Shortcut routing: key 1 → MCP; keys 2-5 remapped (RSP↔USP, ME↔LE) for mode 4; key 6 → AP; key 7 → AP_opp; key 8 → Finalize Trunk
+  - F-keys (left side) inactive in mode 4 — mode 4 is single-arm only
+  - `_build_arm4`: single-column landmark grid (7 cells), Finalize Trunk [8], Save/Load/Clear, canvas
+  - Frame assignments: MCP → Hand, USP/RSP → Forearm, ME/LE/AP → UpperArm, AP_opp → Trunk (after Finalize)
+  - `AP_opp` workflow: pointer records in UpperArm frame (`_arm4_tmp`), then place S4 on trunk, key 8 finalizes to Trunk frame via `finalize_forearm`
+  - Auto-save to `digitization_mode4.json`
+  - Canvas: 4-sensor display + landmark dots + wrist/elbow joint skeleton + AP line
+
+---
+
 ## Next Session
 
-**Digitization (MCP joint recording)**
-- S1 (오른손), S2 (왼손), S3 (포인터)로 MCP 관절 위치 기록
-- 센서 오프셋 계산 → 손가락 끝 위치 추정
-- PLAN.md 참고
+- Mode 2/3/4 실제 데이터로 테스트 및 검증
+- Game screen에서 digitization 결과 활용 (손/팔 위치 계산)

@@ -94,12 +94,21 @@ class GameScreen(QWidget):
         self.update()
 
     def _read_sensor(self):
-        s = self.liberty.get_sensor(1)
-        if s is None:
-            return
+        from digitizer import track_mcp
         st = self.state
-        y = s.y * 2.54 - st.sensor_y_offset
-        z = s.z * 2.54 - st.sensor_z_offset
+        if st.dig_mode >= 1 and st.mcp_offset_right is not None:
+            s = self.liberty.get_sensor(st.dig_sensor_right)
+            if s is None:
+                return
+            pos = track_mcp(s, st.mcp_offset_right)
+            y = pos[1] - st.sensor_y_offset
+            z = pos[2] - st.sensor_z_offset
+        else:
+            s = self.liberty.get_sensor(st.dig_sensor_right)
+            if s is None:
+                return
+            y = s.y * 2.54 - st.sensor_y_offset
+            z = s.z * 2.54 - st.sensor_z_offset
         self._cursor_in_ws = (st.WORKSPACE_Y_MIN <= y <= st.WORKSPACE_Y_MAX and
                               st.WORKSPACE_Z_MIN <= z <= st.WORKSPACE_Z_MAX)
         self._cursor_y = max(st.WORKSPACE_Y_MIN, min(st.WORKSPACE_Y_MAX, y))
