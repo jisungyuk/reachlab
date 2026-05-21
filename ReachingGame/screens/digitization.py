@@ -2407,7 +2407,7 @@ class DigitizationScreen(QWidget):
         else:
             y = s.y * 2.54 - self.state.sensor_y_offset
             z = s.z * 2.54 - self.state.sensor_z_offset
-            x = s.x * 2.54
+            x = s.x * 2.54 - self.state.sensor_x_offset
             lbl.setText(f"● ACTIVE    Y: {y:.1f}   Z: {z:.1f}   X: {x:.1f} cm")
             lbl.setStyleSheet("color: #228822;" if assigned else "color: #888888;")
 
@@ -2434,7 +2434,7 @@ class DigitizationScreen(QWidget):
             pos = track_mcp(s, offset)
             y = pos[1] - self.state.sensor_y_offset
             z = pos[2] - self.state.sensor_z_offset
-            lbl.setText(f"Y: {y:.1f}   Z: {z:.1f}   X: {pos[0]:.1f} cm")
+            lbl.setText(f"Y: {y:.1f}   Z: {z:.1f}   X: {pos[0] - self.state.sensor_x_offset:.1f} cm")
             lbl.setStyleSheet("color: #228822;")
 
     # ── helpers ───────────────────────────────────────────────
@@ -2638,7 +2638,7 @@ class DigitizationScreen(QWidget):
                 return None
             return (s.y * 2.54 - st.sensor_y_offset,
                     s.z * 2.54 - st.sensor_z_offset,
-                    s.x * 2.54)
+                    s.x * 2.54 - st.sensor_x_offset)
 
         def lm_xyz(sensor_n, offset):
             if offset is None:
@@ -2649,7 +2649,7 @@ class DigitizationScreen(QWidget):
             pos = track_mcp(s, offset)
             return (pos[1] - st.sensor_y_offset,
                     pos[2] - st.sensor_z_offset,
-                    pos[0])
+                    pos[0] - st.sensor_x_offset)
 
         def mid3(a, b):
             if a and b:

@@ -9,9 +9,10 @@ from screens.environment import EnvironmentScreen
 from screens.calibration import CalibrationScreen
 from screens.digitization import DigitizationScreen
 
-import tasks.reaching_task as reaching_task
+import tasks.reaching_task  as reaching_task
+import tasks.workspace_task as workspace_task
 
-TASKS = [reaching_task]
+TASKS = [reaching_task, workspace_task]
 
 DUMMY_DATA_DIR = r'C:\Users\Jisung Yuk\Desktop\Liberty\test'
 
@@ -69,30 +70,43 @@ class MainWindow(QMainWindow):
         self.state.data_dir = DUMMY_DATA_DIR
         self.screens['menu'].folder_edit.setText(DUMMY_DATA_DIR)
 
-        # 1 target: angle=90, distance=20, diameter=5
+        # 3 targets: 45°, 90°, 135° — distance=20, diameter=5
         t = self.screens[reaching_task.TARGETS_SCREEN].table
         t.setRowCount(0)
-        t.insertRow(0)
-        for col, val in enumerate(['1', '90', '20', '5']):
-            item = QTableWidgetItem(val)
-            item.setTextAlignment(0x0004 | 0x0080)
-            t.setItem(0, col, item)
+        for row, (tid, ang) in enumerate([('1', '45'), ('2', '90'), ('3', '135')]):
+            t.insertRow(row)
+            for col, val in enumerate([tid, ang, '20', '5']):
+                item = QTableWidgetItem(val)
+                item.setTextAlignment(0x0004 | 0x0080)
+                t.setItem(row, col, item)
 
-        # 10 trials with defaults
+        # 10 trials cycling through target IDs 1→2→3
         s = self.screens[reaching_task.SESSIONS_SCREEN].table
         s.setRowCount(0)
+        target_cycle = ['1', '2', '3', '1', '2', '3', '1', '2', '3', '1']
         for i in range(10):
             s.insertRow(i)
-            for col, val in enumerate([str(i + 1), '1', '1', '0.5', '2.0', '3.0', '1']):
+            for col, val in enumerate([str(i + 1), '1', target_cycle[i], '0.5', '2.0', '3.0', '1']):
                 item = QTableWidgetItem(val)
                 item.setTextAlignment(0x0004 | 0x0080)
                 s.setItem(i, col, item)
+
+        # Workspace: 3 trials R (target arm) + 3 trials L (testing arm)
+        ws = self.screens[workspace_task.SESSIONS_SCREEN].table
+        ws.setRowCount(0)
+        for i, arm in enumerate(['R'] * 10 + ['L'] * 10):
+            ws.insertRow(i)
+            for col, val in enumerate([str(i + 1), arm, '3', '3', '1']):
+                item = QTableWidgetItem(val)
+                item.setTextAlignment(0x0004 | 0x0080)
+                ws.setItem(i, col, item)
 
     def _clear_dummy_defaults(self):
         self.state.data_dir = ''
         self.screens['menu'].folder_edit.setText('')
         self.screens[reaching_task.TARGETS_SCREEN].table.setRowCount(0)
         self.screens[reaching_task.SESSIONS_SCREEN].table.setRowCount(0)
+        self.screens[workspace_task.SESSIONS_SCREEN].table.setRowCount(0)
 
     def _add(self, name, widget):
         self.screens[name] = widget

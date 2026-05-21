@@ -1,5 +1,7 @@
-TASK_KEY   = 'reaching'
-TASK_LABEL = 'Reaching Task'
+TASK_KEY     = 'reaching'
+TASK_LABEL   = 'Reaching Task'
+HAS_TARGETS  = True
+HAS_SESSIONS = True
 
 TARGETS_SCREEN  = 'reaching_targets'
 SESSIONS_SCREEN = 'reaching_sessions'

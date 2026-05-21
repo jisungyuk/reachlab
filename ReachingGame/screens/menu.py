@@ -15,8 +15,9 @@ BTN_STYLE = """
         font-size: 18px; padding: 10px;
         min-width: 300px; max-width: 300px;
     }
-    QPushButton:hover  { background-color: #999999; }
-    QPushButton:pressed{ background-color: #777777; }
+    QPushButton:hover     { background-color: #999999; }
+    QPushButton:pressed   { background-color: #777777; }
+    QPushButton:disabled  { background-color: #555555; color: #888888; }
 """
 
 
@@ -149,6 +150,13 @@ class MenuScreen(QWidget):
             " selection-background-color: #b0c8e0; }"
         )
         self.task_combo.currentIndexChanged.connect(self._on_task_changed)
+        # Sync combo to persisted task_type without re-triggering the slot
+        for i in range(self.task_combo.count()):
+            if self.task_combo.itemData(i) == self.state.task_type:
+                self.task_combo.blockSignals(True)
+                self.task_combo.setCurrentIndex(i)
+                self.task_combo.blockSignals(False)
+                break
         task_row.addWidget(self.task_combo)
         task_row.addStretch()
         root.addLayout(task_row, 0)
@@ -219,7 +227,7 @@ class MenuScreen(QWidget):
             ('Environment',  'environment'),
             ('Calibration',  'calibration'),
             ('Digitization', 'digitization'),
-            ('Game',         None),
+            ('Game',         'game'),
             ('Targets',      'targets'),
             ('Sessions',     'sessions'),
             ('Quit',         'quit'),
@@ -280,7 +288,10 @@ class MenuScreen(QWidget):
         super().keyPressEvent(e)
 
     def _on_task_changed(self, index):
-        self.state.task_type = self.task_combo.itemData(index)
+        key = self.task_combo.itemData(index)
+        self.state.task_type = key
+        self.state.load_task_rect(key)
+        self._update_status()
 
     def _browse_folder(self):
         path = QFileDialog.getExistingDirectory(self, "Select Data Folder", self.state.data_dir or "")
@@ -302,6 +313,10 @@ class MenuScreen(QWidget):
             if task:
                 self.mw.show_screen(task.GAME_SCREEN)
 
+        elif key == 'game':
+            if task and getattr(task, 'HAS_GAME_SETTINGS', False):
+                self.mw.show_screen(task.GAME_SETTINGS_SCREEN)
+
         elif key == 'environment':
             self.mw.show_screen('environment')
 
@@ -321,13 +336,14 @@ class MenuScreen(QWidget):
 
         elif key == 'sessions':
             if task:
-                target_screen = self.mw.screens.get(task.TARGETS_SCREEN)
-                if target_screen is None or target_screen.table.rowCount() == 0:
-                    QMessageBox.warning(
-                        self, "No Targets",
-                        "Please configure at least one target in the Targets screen first."
-                    )
-                    return
+                if getattr(task, 'HAS_TARGETS', True):
+                    target_screen = self.mw.screens.get(getattr(task, 'TARGETS_SCREEN', ''))
+                    if target_screen is None or target_screen.table.rowCount() == 0:
+                        QMessageBox.warning(
+                            self, "No Targets",
+                            "Please configure at least one target in the Targets screen first."
+                        )
+                        return
                 self.mw.show_screen(task.SESSIONS_SCREEN)
 
     def _on_toggle(self, on):
@@ -355,14 +371,22 @@ class MenuScreen(QWidget):
         self.dummy_lbl.setStyleSheet(f"color: {dummy_color};")
 
     def _set_locked(self, locked):
+        task = self._current_task()
+        has_targets       = getattr(task, 'HAS_TARGETS',       True)  if task else True
+        has_game_settings = getattr(task, 'HAS_GAME_SETTINGS', False) if task else False
         self.task_combo.setEnabled(not locked)
         self.browse_btn.setEnabled(not locked)
         self.rate_spin.setEnabled(not locked)
         self.toggle.setEnabled(not locked)
         self.mouse_toggle.setEnabled(not locked)
-        for btn in self.btns.values():
+        for key, btn in self.btns.items():
             if btn is not None:
-                btn.setEnabled(not locked)
+                if key == 'targets' and not has_targets:
+                    btn.setEnabled(False)
+                elif key == 'game' and not has_game_settings:
+                    btn.setEnabled(False)
+                else:
+                    btn.setEnabled(not locked)
 
     def _update_status(self):
         game_running = any(w.isVisible() for w in self.mw.game_windows.values())

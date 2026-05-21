@@ -3,7 +3,7 @@ import threading
 import winsound
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QDoubleSpinBox, QComboBox, QPushButton,
-                             QSizePolicy, QFrame)
+                             QSizePolicy, QFrame, QMessageBox)
 from PyQt5.QtCore import Qt, QPointF, QPoint, QTimer, pyqtSignal
 from PyQt5.QtGui import QPainter, QColor, QBrush, QPen, QFont, QPolygon
 
@@ -329,6 +329,14 @@ class EnvironmentScreen(QWidget):
         self._origin_timer.timeout.connect(self._origin_tick)
         self._build()
 
+    def showEvent(self, e):
+        super().showEvent(e)
+        if self.state.env_rect_x is not None:
+            self.canvas.restore_rect(
+                self.state.env_rect_x, self.state.env_rect_y,
+                self.state.env_rect_w, self.state.env_rect_h,
+            )
+
     def _build(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 20)
@@ -641,14 +649,17 @@ class EnvironmentScreen(QWidget):
         self.state.env_rect_y        = self.canvas._ry
         self.state.env_rect_w        = self.canvas._rw
         self.state.env_rect_h        = self.canvas._rh
-        self.state.save_config()
+        self.state.save_task_rect(self.state.task_type)
+        task_name = self.state.task_type.replace('_', ' ').title() + ' Task'
+        QMessageBox.information(self, "Saved", f"{task_name} environment settings saved.")
 
     def _origin_text(self):
+        x = self.state.sensor_x_offset
         y = self.state.sensor_y_offset
         z = self.state.sensor_z_offset
-        if y == 0.0 and z == 0.0:
+        if x == 0.0 and y == 0.0 and z == 0.0:
             return "Origin: not set"
-        return f"Origin: Y {y:.1f} cm, Z {z:.1f} cm"
+        return f"Origin: X {x:.1f} cm, Y {y:.1f} cm, Z {z:.1f} cm"
 
     def _start_origin(self):
         if self._origin_timer.isActive():
@@ -669,8 +680,12 @@ class EnvironmentScreen(QWidget):
         if s is None:
             self.origin_lbl.setText("No sensor data")
             return
+        self.state.sensor_x_offset = s.x * 2.54
         self.state.sensor_y_offset = s.y * 2.54
         self.state.sensor_z_offset = s.z * 2.54
         self.state.save_config()
-        threading.Thread(target=winsound.Beep, args=(880, 120), daemon=True).start()
+        def _arpeggio():
+            for freq, dur in [(523, 80), (659, 80), (784, 80), (1047, 280)]:
+                winsound.Beep(freq, dur)
+        threading.Thread(target=_arpeggio, daemon=True).start()
         self.origin_lbl.setText(self._origin_text())

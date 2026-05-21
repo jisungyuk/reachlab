@@ -32,8 +32,20 @@ class AppState:
         self.env_rect_h        = None
 
         # Sensor origin offset in cm
+        self.sensor_x_offset   = 0.0
         self.sensor_y_offset   = 0.0
         self.sensor_z_offset   = 0.0
+
+        # Workspace game settings
+        self.ws_ghost_mode       = 'individual'   # 'individual' | 'average'
+        self.ws_speed_gauge_on   = True
+        self.ws_speed_window_ms  = 200            # rolling window for speed calc (ms)
+        self.ws_speed_min_R      = 3.0            # target zone lower bound — right arm (cm/s)
+        self.ws_speed_max_R      = 10.0           # target zone upper bound — right arm (cm/s)
+        self.ws_speed_min_L      = 3.0            # target zone lower bound — left arm (cm/s)
+        self.ws_speed_max_L      = 10.0           # target zone upper bound — left arm (cm/s)
+        self.ws_guide_line_on    = False
+        self.ws_guide_speed_degs = 15.0           # degrees per second
 
         # Digitization — Mode 0: Cursor  (nothing below is persisted across restarts)
         self.dig_mode              = 0
@@ -103,17 +115,61 @@ class AppState:
         'WORKSPACE_Z_MIN', 'WORKSPACE_Z_MAX',
         'env_mon_size', 'env_mon_unit', 'env_mon_ratio_idx',
         'env_desk_w', 'env_desk_h', 'env_desk_unit',
-        'env_rect_x', 'env_rect_y', 'env_rect_w', 'env_rect_h',
-        'sensor_y_offset', 'sensor_z_offset',
-        # Digitization fields are intentionally NOT persisted —
-        # they reset to defaults on every program start.
-        # Use the Save/Load buttons inside Digitization for crash recovery.
+        'sensor_x_offset', 'sensor_y_offset', 'sensor_z_offset',
+        # env_rect_* are per-task and saved/loaded via save/load_task_rect.
+        # Digitization fields are intentionally NOT persisted.
     )
 
+    _TASK_RECT_KEYS = ('env_rect_x', 'env_rect_y', 'env_rect_w', 'env_rect_h')
+
     def save_config(self):
-        data = {k: getattr(self, k) for k in self._PERSIST_KEYS}
+        data = {}
+        if os.path.exists(_CONFIG_PATH):
+            try:
+                with open(_CONFIG_PATH) as f:
+                    data = json.load(f)
+            except Exception:
+                pass
+        for k in self._PERSIST_KEYS:
+            data[k] = getattr(self, k)
         with open(_CONFIG_PATH, 'w') as f:
             json.dump(data, f, indent=2)
+
+    def save_task_rect(self, task_key):
+        """Save env_rect_* to tasks.{task_key} section and persist global keys."""
+        data = {}
+        if os.path.exists(_CONFIG_PATH):
+            try:
+                with open(_CONFIG_PATH) as f:
+                    data = json.load(f)
+            except Exception:
+                pass
+        for k in self._PERSIST_KEYS:
+            data[k] = getattr(self, k)
+        tasks = data.setdefault('tasks', {})
+        tasks[task_key] = {k: getattr(self, k) for k in self._TASK_RECT_KEYS}
+        with open(_CONFIG_PATH, 'w') as f:
+            json.dump(data, f, indent=2)
+
+    def load_task_rect(self, task_key):
+        """Load env_rect_* from tasks.{task_key}, falling back to top-level values."""
+        if not os.path.exists(_CONFIG_PATH):
+            return
+        try:
+            with open(_CONFIG_PATH) as f:
+                data = json.load(f)
+            task_data = data.get('tasks', {}).get(task_key)
+            if task_data:
+                for k in self._TASK_RECT_KEYS:
+                    if k in task_data:
+                        setattr(self, k, task_data[k])
+            else:
+                # backward compat: use top-level env_rect_* if tasks section absent
+                for k in self._TASK_RECT_KEYS:
+                    if k in data:
+                        setattr(self, k, data[k])
+        except Exception:
+            pass
 
     def load_config(self):
         if not os.path.exists(_CONFIG_PATH):
@@ -126,3 +182,4 @@ class AppState:
                     setattr(self, k, v)
         except Exception:
             pass
+        self.load_task_rect(self.task_type)

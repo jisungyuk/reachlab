@@ -328,12 +328,12 @@ class GameScreen(QWidget):
             p.setFont(QFont('Arial', 36, QFont.Bold))
             p.drawText(self.rect().adjusted(0, 0, 0, -20), Qt.AlignBottom | Qt.AlignHCenter, "GO!")
 
-        # Target circle — always shown during trial
-        if self._t_state in ('MoveToStart', 'HoldInStart', 'ShowDirection', 'Executing', 'Feedback'):
+        # Target circle — open ring, hidden during Feedback
+        if self._t_state in ('MoveToStart', 'HoldInStart', 'ShowDirection', 'Executing'):
             tsx, tsy = self._to_screen(t['target_y'], t['target_z'])
             trx, trz = self._r_px(t['target_r'])
-            p.setBrush(QBrush(QColor(120, 120, 120)))
-            p.setPen(Qt.NoPen)
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(QColor(120, 120, 120), 4))
             p.drawEllipse(QPoint(tsx, tsy), trx, trz)
 
         # Feedback — frozen cursor + GOOD/BAD
