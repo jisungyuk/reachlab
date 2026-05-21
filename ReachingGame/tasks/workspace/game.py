@@ -2,7 +2,6 @@ import math
 import time
 import threading
 import winsound
-from collections import deque
 from PyQt5.QtWidgets import QWidget
 from PyQt5.QtCore import Qt, QTimer, QRect, QPoint
 from PyQt5.QtGui import QPainter, QColor, QBrush, QFont, QPen, QPolygon
@@ -64,8 +63,6 @@ class GameScreen(QWidget):
         self._oob_timer    = 0.0                  # out-of-bounds timer during recording
         self._last_area    = 0.0                  # area of most recent trial (cm²)
         self._areas        = {'R': [], 'L': []}   # per-arm area history
-        self._speed_buf    = deque()              # (time, y, z) rolling window
-        self._cur_speed    = 0.0                  # cm/s
 
         self._guide_angle = None   # degrees; None = inactive
 
@@ -92,8 +89,6 @@ class GameScreen(QWidget):
         self._oob_timer    = 0.0
         self._last_area    = 0.0
         self._areas        = {'R': [], 'L': []}
-        self._speed_buf    = deque()
-        self._cur_speed    = 0.0
         self._guide_angle  = None
         self._build_trials()
         if self._trials:
@@ -122,7 +117,6 @@ class GameScreen(QWidget):
 
         if self._phase == 'recording':
             self._traj.append((self._cursor_y, self._cursor_z))
-            self._update_speed()
             self._update_guide_angle()
             st = self.state
             inside = (st.WORKSPACE_Y_MIN <= self._cursor_y <= st.WORKSPACE_Y_MAX and
@@ -208,28 +202,12 @@ class GameScreen(QWidget):
         elif self._phase == 'recording':
             self._end_recording()
 
-    def _update_speed(self):
-        now = time.perf_counter()
-        self._speed_buf.append((now, self._cursor_y, self._cursor_z))
-        win = self.state.ws_speed_window_ms / 1000.0
-        while self._speed_buf and (now - self._speed_buf[0][0]) > win:
-            self._speed_buf.popleft()
-        if len(self._speed_buf) >= 2:
-            dist = sum(
-                math.sqrt((self._speed_buf[i][1] - self._speed_buf[i-1][1])**2 +
-                          (self._speed_buf[i][2] - self._speed_buf[i-1][2])**2)
-                for i in range(1, len(self._speed_buf))
-            )
-            elapsed = self._speed_buf[-1][0] - self._speed_buf[0][0]
-            self._cur_speed = dist / max(elapsed, 0.001)
-        else:
-            self._cur_speed = 0.0
-
     def _update_guide_angle(self):
         if self._guide_angle is None:
             return
-        arm = self._trials[self._trial_idx]['arm']
-        delta = self.state.ws_guide_speed_degs * self._dt
+        arm   = self._trials[self._trial_idx]['arm']
+        speed = self.state.ws_guide_speed_R if arm == 'R' else self.state.ws_guide_speed_L
+        delta = speed * self._dt
         if arm == 'R':
             self._guide_angle = max(0.0, self._guide_angle - delta)
         else:
@@ -237,8 +215,6 @@ class GameScreen(QWidget):
 
     def _end_recording(self):
         self._oob_timer   = 0.0
-        self._speed_buf.clear()
-        self._cur_speed   = 0.0
         self._guide_angle = None
         self._show_pts   = list(self._traj)
         self._show_timer = 0.0
@@ -377,7 +353,6 @@ class GameScreen(QWidget):
             self._draw_live_traj(p)
         if self._phase == 'recording':
             self._draw_guide_line(p)
-            self._draw_speed_gauge(p)
         elif self._phase == 'show_traj':
             self._draw_show_traj(p)
             self._draw_area_info(p, arm)
@@ -526,58 +501,6 @@ class GameScreen(QWidget):
         ex, ey = self._to_screen(far_y, far_z)
         p.setPen(QPen(QColor(200, 200, 200, 160), 1))
         p.drawLine(sx, sy_s, ex, ey)
-
-    def _draw_speed_gauge(self, p):
-        if not self.state.ws_speed_gauge_on:
-            return
-        st  = self.state
-        arm = self._trials[self._trial_idx]['arm']
-        spd_min = st.ws_speed_min_R if arm == 'R' else st.ws_speed_min_L
-        spd_max = st.ws_speed_max_R if arm == 'R' else st.ws_speed_max_L
-
-        PAD  = 70
-        bx   = self.width() - 38
-        bw   = 18
-        bh   = self.height() - 2 * PAD
-        by   = PAD
-
-        scale_max = max(spd_max * 2.0, 1.0)
-
-        def fy(spd):
-            return by + int((1.0 - min(spd / scale_max, 1.0)) * bh)
-
-        # Track background
-        p.setBrush(QBrush(QColor(40, 40, 40)))
-        p.setPen(Qt.NoPen)
-        p.drawRoundedRect(bx, by, bw, bh, 4, 4)
-
-        # Filled bar (0 → current speed)
-        if self._cur_speed > 0.01:
-            cur_y = fy(self._cur_speed)
-            bot_y = fy(0)
-            if self._cur_speed > spd_max:
-                fill = QColor(220, 50, 50)
-            elif self._cur_speed >= spd_min:
-                fill = QColor(50, 200, 80)
-            else:
-                fill = QColor(120, 120, 120)
-            p.setBrush(QBrush(fill))
-            p.drawRoundedRect(bx, cur_y, bw, bot_y - cur_y, 4, 4)
-
-        # Threshold lines + labels
-        for spd, label in [(spd_min, f"{spd_min:.0f}"),
-                            (spd_max, f"{spd_max:.0f}")]:
-            ly = fy(spd)
-            p.setPen(QPen(QColor(200, 200, 200), 1))
-            p.drawLine(bx - 5, ly, bx + bw + 5, ly)
-            p.setPen(QColor(160, 160, 160))
-            p.setFont(QFont('Arial', 10))
-            p.drawText(bx - 28, ly - 7, 24, 14, Qt.AlignRight | Qt.AlignVCenter, label)
-
-        # Current speed value above bar
-        p.setPen(QColor(220, 220, 220))
-        p.setFont(QFont('Arial', 11))
-        p.drawText(bx - 4, by - 18, bw + 8, 16, Qt.AlignCenter, f"{self._cur_speed:.1f}")
 
     def _draw_text(self, p, text):
         p.setPen(QColor(220, 220, 220))

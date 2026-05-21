@@ -38,14 +38,9 @@ class AppState:
 
         # Workspace game settings
         self.ws_ghost_mode       = 'individual'   # 'individual' | 'average'
-        self.ws_speed_gauge_on   = True
-        self.ws_speed_window_ms  = 200            # rolling window for speed calc (ms)
-        self.ws_speed_min_R      = 3.0            # target zone lower bound — right arm (cm/s)
-        self.ws_speed_max_R      = 10.0           # target zone upper bound — right arm (cm/s)
-        self.ws_speed_min_L      = 3.0            # target zone lower bound — left arm (cm/s)
-        self.ws_speed_max_L      = 10.0           # target zone upper bound — left arm (cm/s)
         self.ws_guide_line_on    = False
-        self.ws_guide_speed_degs = 15.0           # degrees per second
+        self.ws_guide_speed_R    = 15.0           # guide line sweep speed — right arm (°/s)
+        self.ws_guide_speed_L    = 15.0           # guide line sweep speed — left arm (°/s)           # degrees per second
 
         # Digitization — Mode 0: Cursor  (nothing below is persisted across restarts)
         self.dig_mode              = 0
