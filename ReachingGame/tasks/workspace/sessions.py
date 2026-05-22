@@ -20,10 +20,10 @@ STYLE = """
     QPushButton:pressed{ background-color: #777777; }
 """
 
-COLUMNS    = ['#', 'Arm', 'Radius (cm)', 'Display (s)', 'Draw']
-CSV_FIELDS = ['trial', 'arm', 'radius_cm', 'display_s', 'draw']
+COLUMNS    = ['#', 'Arm', 'Display (s)', 'Draw']
+CSV_FIELDS = ['trial', 'arm', 'display_s', 'draw']
 NUM_COLS   = len(COLUMNS)
-DEFAULTS   = ['1', 'R', '5', '3', '1']
+DEFAULTS   = ['1', 'R', '3', '1']
 
 
 def _cell(text):
@@ -173,10 +173,9 @@ class SessionScreen(QWidget):
                 for row_data in csv.DictReader(f):
                     r = self.table.rowCount()
                     self.table.insertRow(r)
-                    self.table.setItem(r, 0, _cell(row_data.get('trial',      str(r + 1))))
-                    self.table.setItem(r, 1, _cell(row_data.get('arm',        'R')))
-                    self.table.setItem(r, 2, _cell(row_data.get('radius_cm',  '5')))
-                    self.table.setItem(r, 3, _cell(row_data.get('display_s',  '3')))
-                    self.table.setItem(r, 4, _cell(row_data.get('draw',       '1')))
+                    self.table.setItem(r, 0, _cell(row_data.get('trial',     str(r + 1))))
+                    self.table.setItem(r, 1, _cell(row_data.get('arm',       'R')))
+                    self.table.setItem(r, 2, _cell(row_data.get('display_s', '3')))
+                    self.table.setItem(r, 3, _cell(row_data.get('draw',      '1')))
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load CSV:\n{e}")

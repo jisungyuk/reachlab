@@ -57,12 +57,12 @@ class GameScreen(QWidget):
         self._show_pts     = []
         self._show_timer   = 0.0
         self._switch_timer = 0.0
-        self._envelopes    = {'R': [], 'L': []}   # list of (bins, sy, sz)
-        self._pending_env  = None                 # (bins, arm, sy, sz) — added on advance
-        self._target_bnd   = None                 # (avg_bins, target_arm, testing_arm)
-        self._oob_timer    = 0.0                  # out-of-bounds timer during recording
-        self._last_area    = 0.0                  # area of most recent trial (cm²)
-        self._areas        = {'R': [], 'L': []}   # per-arm area history
+        self._envelopes      = {'R': [], 'L': []}   # list of (bins, sy, sz)
+        self._pending_env    = None                 # (bins, arm, sy, sz) — added on advance
+        self._target_bnd     = None                 # (avg_bins, target_arm, testing_arm)
+        self._lateral_line_z = None                 # Z of horizontal reference line
+        self._last_area      = 0.0                  # area of most recent trial (cm²)
+        self._areas          = {'R': [], 'L': []}   # per-arm area history
 
         self._guide_angle = None   # degrees; None = inactive
 
@@ -83,13 +83,13 @@ class GameScreen(QWidget):
         self._show_pts     = []
         self._show_timer   = 0.0
         self._switch_timer = 0.0
-        self._envelopes    = {'R': [], 'L': []}
-        self._pending_env  = None
-        self._target_bnd   = None
-        self._oob_timer    = 0.0
-        self._last_area    = 0.0
-        self._areas        = {'R': [], 'L': []}
-        self._guide_angle  = None
+        self._envelopes      = {'R': [], 'L': []}
+        self._pending_env    = None
+        self._target_bnd     = None
+        self._lateral_line_z = None
+        self._last_area      = 0.0
+        self._areas          = {'R': [], 'L': []}
+        self._guide_angle    = None
         self._build_trials()
         if self._trials:
             self._trial_idx = 0
@@ -118,15 +118,6 @@ class GameScreen(QWidget):
         if self._phase == 'recording':
             self._traj.append((self._cursor_y, self._cursor_z))
             self._update_guide_angle()
-            st = self.state
-            inside = (st.WORKSPACE_Y_MIN <= self._cursor_y <= st.WORKSPACE_Y_MAX and
-                      st.WORKSPACE_Z_MIN <= self._cursor_z <= st.WORKSPACE_Z_MAX)
-            if inside:
-                self._oob_timer = 0.0
-            else:
-                self._oob_timer += self._dt
-                if self._oob_timer >= 2.0:
-                    self._end_recording()
 
         elif self._phase == 'show_traj':
             self._show_timer += self._dt
@@ -173,28 +164,29 @@ class GameScreen(QWidget):
         for r in range(scr.table.rowCount()):
             self._trials.append({
                 'arm':       scr.table.item(r, 1).text().strip().upper(),
-                'radius_cm': float(scr.table.item(r, 2).text()),
-                'display_s': float(scr.table.item(r, 3).text()),
-                'draw':      int(scr.table.item(r, 4).text()),
+                'display_s': float(scr.table.item(r, 2).text()),
+                'draw':      int(scr.table.item(r, 3).text()),
             })
 
     # ──────────────────────────────────────────────────── state machine
 
     def _enter_trial(self):
         arm = self._trials[self._trial_idx]['arm']
-        self._traj = []
-        self._phase = 'set_start' if self._start_pts[arm] is None else 'wait_ready'
+        self._traj           = []
+        self._lateral_line_z = None
+        self._phase = 'set_start' if self._start_pts[arm] is None else 'set_lateral'
 
     def _on_space(self):
         if self._phase == 'set_start':
             arm = self._trials[self._trial_idx]['arm']
             self._start_pts[arm] = (self._cursor_y, self._cursor_z)
-            self._phase = 'wait_ready'
+            self._phase = 'set_lateral'
             _beep(660, 100)
 
-        elif self._phase == 'wait_ready':
+        elif self._phase == 'set_lateral':
             arm = self._trials[self._trial_idx]['arm']
-            self._guide_angle = 180.0 if arm == 'R' else 0.0
+            self._lateral_line_z = self._cursor_z
+            self._guide_angle    = 180.0 if arm == 'R' else 0.0
             self._phase = 'recording'
             self._traj  = [(self._cursor_y, self._cursor_z)]
             _beep(880, 80)
@@ -214,7 +206,6 @@ class GameScreen(QWidget):
             self._guide_angle = min(180.0, self._guide_angle + delta)
 
     def _end_recording(self):
-        self._oob_timer   = 0.0
         self._guide_angle = None
         self._show_pts   = list(self._traj)
         self._show_timer = 0.0
@@ -310,12 +301,6 @@ class GameScreen(QWidget):
         z  = s.WORKSPACE_Z_MIN + (self._ws.bottom() - py) / max(self._ws.height(), 1) * dz
         return y, z
 
-    def _r_px(self, r_cm):
-        s  = self.state
-        sy = self._ws.width()  / max(s.WORKSPACE_Y_MAX - s.WORKSPACE_Y_MIN, 0.01)
-        sz = self._ws.height() / max(s.WORKSPACE_Z_MAX - s.WORKSPACE_Z_MIN, 0.01)
-        return max(1, int(r_cm * sy)), max(1, int(r_cm * sz))
-
     # ──────────────────────────────────────────────────── drawing
 
     def paintEvent(self, e):
@@ -342,17 +327,18 @@ class GameScreen(QWidget):
 
         self._draw_ghosts(p, arm)
         self._draw_target_boundary(p, arm)
-        self._draw_start_circle(p, trial, arm)
+        self._draw_lateral_line(p)
+        self._draw_center_line(p, arm)
 
         if self._phase == 'set_start':
-            self._draw_instruction(p, f"Position {'Right' if arm == 'R' else 'Left'} hand "
-                                      f"and press SPACE to set start point")
-        elif self._phase == 'wait_ready':
-            self._draw_instruction(p, "Press SPACE to start")
-        elif self._phase == 'recording' and trial['draw']:
-            self._draw_live_traj(p)
-        if self._phase == 'recording':
+            self._draw_instruction(p, "Position your center, then press SPACE.")
+        elif self._phase == 'set_lateral':
+            self._draw_instruction(p, "Extend arm to max lateral, then press SPACE.")
+        elif self._phase == 'recording':
+            if trial['draw']:
+                self._draw_live_traj(p)
             self._draw_guide_line(p)
+            self._draw_instruction(p, "Follow the guideline. Reach as far as possible.")
         elif self._phase == 'show_traj':
             self._draw_show_traj(p)
             self._draw_area_info(p, arm)
@@ -366,17 +352,22 @@ class GameScreen(QWidget):
         p.setPen(Qt.NoPen)
         p.drawEllipse(QPoint(sx, sy), 7, 7)
 
-    def _draw_start_circle(self, p, trial, arm):
+    def _draw_center_line(self, p, arm):
         sp = self._start_pts[arm]
         if sp is None:
             return
         cy, cz = sp
-        sx, sy = self._to_screen(cy, cz)
-        rx, rz = self._r_px(trial['radius_cm'])
-        inside = (self._cursor_y - cy)**2 + (self._cursor_z - cz)**2 <= trial['radius_cm']**2
-        p.setBrush(Qt.NoBrush)
-        p.setPen(QPen(QColor(255, 255, 255) if inside else QColor(100, 100, 100), 3))
-        p.drawEllipse(QPoint(sx, sy), rx, rz)
+        x1, y1 = self._to_screen(cy, cz - 2.5)
+        x2, y2 = self._to_screen(cy, cz + 2.5)
+        p.setPen(QPen(QColor(255, 255, 255), 2))
+        p.drawLine(x1, y1, x2, y2)
+
+    def _draw_lateral_line(self, p):
+        if self._lateral_line_z is None:
+            return
+        _, line_y = self._to_screen(0, self._lateral_line_z)
+        p.setPen(QPen(QColor(160, 160, 160), 1))
+        p.drawLine(0, line_y, self.width(), line_y)
 
     def _draw_ghosts(self, p, arm):
         env_list = self._envelopes[arm]

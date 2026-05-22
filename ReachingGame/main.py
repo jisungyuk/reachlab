@@ -96,7 +96,7 @@ class MainWindow(QMainWindow):
         ws.setRowCount(0)
         for i, arm in enumerate(['R'] * 10 + ['L'] * 10):
             ws.insertRow(i)
-            for col, val in enumerate([str(i + 1), arm, '3', '3', '1']):
+            for col, val in enumerate([str(i + 1), arm, '3', '1']):
                 item = QTableWidgetItem(val)
                 item.setTextAlignment(0x0004 | 0x0080)
                 ws.setItem(i, col, item)
