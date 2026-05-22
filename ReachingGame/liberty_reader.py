@@ -1,6 +1,7 @@
 import struct
 import time
 import threading
+from collections import deque
 
 PIPE_NAME = r'\\.\pipe\PDIPnOPipe'
 
@@ -20,6 +21,7 @@ class LibertyReader:
         self._connected = False
         self._last_data_time = 0.0
         self._last_sensor_time = {i: 0.0 for i in range(1, 5)}
+        self._packet_times = deque()   # timestamps of recent packets for rate estimation
         self._lock = threading.Lock()
         threading.Thread(target=self._read_loop, daemon=True).start()
 
@@ -31,6 +33,16 @@ class LibertyReader:
 
     def is_sensor_active(self, n):
         return time.perf_counter() - self._last_sensor_time.get(n, 0.0) < 1.5
+
+    def get_read_rate(self):
+        """Return estimated packets/sec over the last 2 seconds."""
+        with self._lock:
+            if len(self._packet_times) < 2:
+                return 0.0
+            span = self._packet_times[-1] - self._packet_times[0]
+            if span <= 0:
+                return 0.0
+            return (len(self._packet_times) - 1) / span
 
     def get_sensor(self, n):
         with self._lock:
@@ -78,6 +90,10 @@ class LibertyReader:
                             now = time.perf_counter()
                             self._last_data_time = now
                             self._last_sensor_time[station] = now
+                            if station == 1:  # track rate via one station only
+                                self._packet_times.append(now)
+                                while self._packet_times and now - self._packet_times[0] > 2.0:
+                                    self._packet_times.popleft()
                 except Exception:
                     pass
             i = idx + 1

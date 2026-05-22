@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QApplication, QMessageBox,
-                             QLineEdit, QFileDialog, QComboBox, QSpinBox)
+                             QLineEdit, QFileDialog, QComboBox, QSpinBox, QCheckBox)
 from PyQt5.QtCore import Qt, QTimer, QPoint, pyqtSignal
 from PyQt5.QtGui import QPainter, QColor, QFont
 from screens.utils import CooldownButton
@@ -206,17 +206,21 @@ class MenuScreen(QWidget):
         rate_row.addSpacing(6)
         self.rate_spin = QSpinBox()
         self.rate_spin.setRange(10, 500)
-        self.rate_spin.setValue(125)
+        self.rate_spin.setValue(self.state.sample_rate_hz)
         self.rate_spin.setSuffix(" Hz")
         self.rate_spin.setFixedWidth(80)
+        self.rate_spin.setReadOnly(True)
         self.rate_spin.setStyleSheet(
-            "QSpinBox { background: #ffffff; color: #000000; border: 1px solid #aaaaaa;"
+            "QSpinBox { background: #e8e8e8; color: #444444; border: 1px solid #aaaaaa;"
             " border-radius: 4px; padding: 2px 6px; font-size: 14px; }"
             "QSpinBox::up-button { width: 0; }"
             "QSpinBox::down-button { width: 0; }"
         )
-        self.rate_spin.valueChanged.connect(lambda v: setattr(self.state, 'sample_rate_hz', v))
         rate_row.addWidget(self.rate_spin)
+        rate_row.addSpacing(16)
+        self.liberty_rate_lbl = QLabel("Liberty: — Hz")
+        self.liberty_rate_lbl.setStyleSheet("color: #666666; font-size: 14px;")
+        rate_row.addWidget(self.liberty_rate_lbl)
         rate_row.addStretch()
         root.addLayout(rate_row, 0)
         root.addSpacing(16)
@@ -240,6 +244,9 @@ class MenuScreen(QWidget):
             root.addWidget(btn, 0, Qt.AlignCenter)
             root.addSpacing(4)
             self.btns[key] = btn
+            if key == 'start':
+                self._build_start_from_row(root)
+                root.addSpacing(4)
 
         root.addStretch()
 
@@ -299,6 +306,43 @@ class MenuScreen(QWidget):
             self.state.data_dir = path
             self.folder_edit.setText(path)
 
+    def _get_session_trial_count(self, task):
+        if task is None:
+            return None
+        sessions_screen = getattr(task, 'SESSIONS_SCREEN', None)
+        if sessions_screen is None:
+            return None
+        scr = self.mw.screens.get(sessions_screen)
+        if scr is None:
+            return None
+        return scr.table.rowCount() or None
+
+    def _build_start_from_row(self, layout):
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        row.addStretch()
+        self.start_from_chk = QCheckBox("Start from trial")
+        self.start_from_chk.setStyleSheet(
+            "QCheckBox { color: #000000; font-size: 13px; spacing: 6px; }"
+            "QCheckBox::indicator { width: 14px; height: 14px; }"
+        )
+        self.start_from_chk.setChecked(False)
+        row.addWidget(self.start_from_chk)
+        self.start_from_edit = QLineEdit()
+        self.start_from_edit.setPlaceholderText("trial #")
+        self.start_from_edit.setFixedWidth(64)
+        self.start_from_edit.setEnabled(False)
+        self.start_from_edit.setStyleSheet(
+            "QLineEdit { background: #ffffff; color: #000000; border: 1px solid #aaaaaa;"
+            " border-radius: 4px; padding: 2px 6px; font-size: 13px; }"
+            "QLineEdit:disabled { background: #555555; color: #888888; }"
+        )
+        self.start_from_chk.toggled.connect(self.start_from_edit.setEnabled)
+        row.addWidget(self.start_from_edit)
+        row.addStretch()
+        layout.addLayout(row, 0)
+
     def _on_btn(self, key):
         task = self._current_task()
 
@@ -310,6 +354,26 @@ class MenuScreen(QWidget):
                 QMessageBox.warning(self, "No Folder Selected",
                                     "Please select a data folder before starting.")
                 return
+            if self.start_from_chk.isChecked():
+                text = self.start_from_edit.text().strip()
+                if not text:
+                    QMessageBox.warning(self, "Empty Trial Number",
+                                        "Please enter a trial number, or uncheck 'Start from trial'.")
+                    return
+                try:
+                    trial_num = int(text)
+                except ValueError:
+                    QMessageBox.warning(self, "Invalid Input", "Trial number must be an integer.")
+                    return
+                total = self._get_session_trial_count(task)
+                if total is not None and (trial_num < 1 or trial_num > total):
+                    QMessageBox.warning(self, "Trial Not Found",
+                                        f"Trial {trial_num} is not defined in the current session "
+                                        f"(session has {total} trials).")
+                    return
+                self.state.start_trial = trial_num
+            else:
+                self.state.start_trial = 1
             if task:
                 self.mw.show_screen(task.GAME_SCREEN)
 
@@ -406,3 +470,9 @@ class MenuScreen(QWidget):
         for n, lbl in self.sensor_lbls.items():
             active = self.liberty.is_sensor_active(n)
             lbl.setStyleSheet(f"color: {'#32dc50' if active else '#dc3232'};")
+
+        rate = self.liberty.get_read_rate()
+        if rate > 0:
+            self.liberty_rate_lbl.setText(f"Liberty: {rate:.0f} Hz")
+        else:
+            self.liberty_rate_lbl.setText("Liberty: — Hz")

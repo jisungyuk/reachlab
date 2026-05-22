@@ -15,7 +15,7 @@ class AppState:
         self.participant_id = ""
         self.session_name = "session_001"
         self.data_dir = ""
-        self.sample_rate_hz = 125
+        self.sample_rate_hz = 250
         self.targets = []
         self.target_radius_inch = 1.5
 
@@ -37,10 +37,12 @@ class AppState:
         self.sensor_z_offset   = 0.0
 
         # Workspace game settings
-        self.ws_ghost_mode       = 'individual'   # 'individual' | 'average'
-        self.ws_guide_line_on    = False
+        self.start_trial         = 1               # 1-based trial to start from
+        self.ws_ghost_mode       = 'individual'   # 'individual' | 'average' | 'max'
+        self.ws_guide_line_on    = True
         self.ws_guide_speed_R    = 15.0           # guide line sweep speed — right arm (°/s)
-        self.ws_guide_speed_L    = 15.0           # guide line sweep speed — left arm (°/s)           # degrees per second
+        self.ws_guide_speed_L    = 15.0           # guide line sweep speed — left arm (°/s)
+        self.ws_elev_dur         = 1.0            # seconds below elevation threshold before abort
 
         # Digitization — Mode 0: Cursor  (nothing below is persisted across restarts)
         self.dig_mode              = 0

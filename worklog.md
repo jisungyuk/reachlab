@@ -228,7 +228,96 @@
 
 ---
 
-## Next Session
+## 2026-05-22
 
-- Mode 2/3/4 실제 데이터로 테스트 및 검증
-- Game screen에서 digitization 결과 활용 (손/팔 위치 계산)
+### Workspace Task — Envelope & Ghost System Overhaul
+
+**60-bin forward-only envelope**
+- 기존 120-bin (forward 60 zeroed) → 60-bin (0°–180°, 3°/bin)으로 변경
+- bin 0 = 정면 0°, bin 59 = 178.5°; atan2 범위 [0, π]에 깔끔하게 대응
+
+**Bin interpolation**
+- 연속된 두 샘플 사이에 직선 보간 추가
+- 각도 변화량 ÷ BIN_RAD + 2 스텝으로 분할 → 빠른 움직임에서도 빈 bin 없음
+
+**Envelope center (중앙점)**
+- 이전: raw start_pts 위치
+- 변경: set_start의 Y + lateral_z의 교차점 = 진짜 기하학적 중앙점
+- `_end_recording`에서 `sy = start_pts[arm][0]`, `sz = lateral_lines[arm]` 사용
+
+**Polygon bottom closing (3-anchor)**
+- 이전: 마지막 arc → 첫 arc 대각선 연결 → 바닥 열림
+- 변경: 마지막 arc → (last_y, close_z) → (center_y, close_z) → (first_y, close_z) 3앵커
+- lateral line에 깔끔하게 닿는 다각형 보장
+
+**Max ghost mode 추가**
+- 기존: Individual (최근 5개) / Average (running mean)
+- 추가: Max (per-bin maximum across all trials)
+- `game_settings.py` 콤보박스 및 설명 라벨 업데이트
+
+**Center rebase**
+- Shift+Space로 start를 다시 설정하면 기존 envelopes의 (sy, sz)를 새 중앙점으로 업데이트
+- envelope 형태(bins)는 유지, origin만 이동
+
+### Workspace Task — UX / Phase Improvements
+
+**Center line**
+- set_start 후 center_y 기준 수직선: z+2 cm → WORKSPACE_Z_MIN까지
+
+**Guide line origin**
+- 이전: raw start_pts에서 출발
+- 변경: envelope center (start_pts.y, lateral_z) 교차점에서 출발
+
+**wait_start UX**
+- 커서가 start circle 밖 → "Return to start position."
+- 커서가 start circle 안 → "Ready for the cue."
+- start circle 밖이면 Space 무효 (안전장치)
+- Shift+Space: 이전 center/lateral/circle 잔상 alpha 0.3으로 표시하고 set_start 재진입
+
+**Elevation (x) feature**
+- Sessions 테이블에 "Elevation (cm)" 컬럼 추가 (0이면 비활성)
+- recording 중 x < threshold 1초 이상 → trial abort (wait_start로 복귀, 비프)
+- wait_start에서 x 부족 시 Space 차단; "Raise your hand!" 경고 표시 (빨간 별도 줄)
+- recording 중에도 x < threshold면 "Raise your hand!" 경고 (guideline은 계속 진행)
+- 커서 색: x 부족 시 빨강, 정상 시 초록
+- dummy + mouse 모드: 마우스 휠로 x 0.5 cm 단위 조절, 커서 아래 수치 표시
+
+**Pause feature**
+- ESC 첫 번째: pause (중앙 네모 "PAUSE" 깜박임, ~2Hz)
+- Space: resume
+- ESC 두 번째: 메뉴로 복귀
+- "SPACE to resume" / "ESC to end the session" 안내 텍스트
+
+**Backspace**: recording 중 누르면 trial 즉시 abort → wait_start
+
+### Workspace Task — Results Display
+
+- 우측 상단에 R avg / L avg (n=x) 항시 표시
+- show_traj 단계에서 해당 trial 면적 (cm²) 상단 중앙 표시
+- 세션 완료 화면에 R/L 평균 + n 크게 표시
+
+### Main Menu — Start from Trial
+
+- Start 버튼 아래 줄: "[ ] Start from trial ___" 체크박스 + 입력란
+- 체크 안 된 상태: 입력란 비활성 (trial 1부터 시작)
+- 체크 후 범위 밖 번호 입력 시 경고 다이얼로그
+- `app_state.ws_start_trial` 연동
+
+### Sampling Rate
+
+- 기본값 125 Hz → 250 Hz로 변경 (타이머 4ms)
+- reaching task 타이머도 동일하게 4ms로 통일
+- 메뉴 sample rate spinbox를 read-only (회색 배경)로 변경
+- 메뉴에 Liberty 실제 read rate 표시 (`liberty_rate_lbl`, 500ms 갱신)
+- `liberty_reader.py`에 `get_read_rate()` 추가: station 1 패킷만 카운트, 최근 2초 평균
+- `tools/measure_liberty_rate.py` 신규: 하드웨어 실제 측정률 측정 스크립트
+
+### Game Settings — Elevation Abort Duration
+
+- "Elevation Abort Duration" 슬롯 추가 (0.1–10.0 s, 기본 1.0 s)
+- `app_state.ws_elev_dur` 연동; `game.py` 하드코딩 1.0 → state 참조로 교체
+
+### Game Settings — Layout Redesign
+
+- 각 섹션 제목을 별도 줄(13pt Bold)로 분리
+- 컨트롤은 그 아래 줄에 12px indent

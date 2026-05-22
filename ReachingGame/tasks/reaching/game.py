@@ -56,16 +56,17 @@ class GameScreen(QWidget):
         self._last_cursor_y    = 0.0
         self._last_cursor_z    = 0.0
 
-        self._dt        = 0.008
+        self._dt        = 0.004
         self._last_tick = time.perf_counter()
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(8)
+        self._timer.start(4)
 
     # ------------------------------------------------------------------ events
 
     def showEvent(self, e):
+        self._timer.start(max(1, round(1000 / self.state.sample_rate_hz)))
         self._phase    = 'calibration'
         self._cursor_y = self.state.WORKSPACE_Y_MAX / 2
         self._cursor_z = self.state.WORKSPACE_Z_MAX / 2

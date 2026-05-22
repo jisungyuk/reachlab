@@ -20,10 +20,10 @@ STYLE = """
     QPushButton:pressed{ background-color: #777777; }
 """
 
-COLUMNS    = ['#', 'Arm', 'Display (s)', 'Draw']
-CSV_FIELDS = ['trial', 'arm', 'display_s', 'draw']
+COLUMNS    = ['#', 'Arm', 'Display (s)', 'Draw', 'Elevation (cm)']
+CSV_FIELDS = ['trial', 'arm', 'display_s', 'draw', 'elev_min_cm']
 NUM_COLS   = len(COLUMNS)
-DEFAULTS   = ['1', 'R', '3', '1']
+DEFAULTS   = ['1', 'R', '3', '1', '0']
 
 
 def _cell(text):
@@ -177,5 +177,6 @@ class SessionScreen(QWidget):
                     self.table.setItem(r, 1, _cell(row_data.get('arm',       'R')))
                     self.table.setItem(r, 2, _cell(row_data.get('display_s', '3')))
                     self.table.setItem(r, 3, _cell(row_data.get('draw',      '1')))
+                    self.table.setItem(r, 4, _cell(row_data.get('elev_min_cm', row_data.get('x_min_cm', '0'))))
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load CSV:\n{e}")

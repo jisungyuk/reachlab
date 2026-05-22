@@ -35,6 +35,13 @@ def _label(text, w=None):
     return lbl
 
 
+def _section_title(text):
+    lbl = QLabel(text)
+    lbl.setFont(QFont('Arial', 13, QFont.Bold))
+    lbl.setStyleSheet("color: #222222;")
+    return lbl
+
+
 def _sep():
     f = QFrame()
     f.setFrameShape(QFrame.HLine)
@@ -54,7 +61,7 @@ class GameSettingsScreen(QWidget):
     def _build(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(30, 20, 30, 20)
-        root.setSpacing(18)
+        root.setSpacing(10)
 
         # Top bar
         top = QHBoxLayout()
@@ -73,16 +80,14 @@ class GameSettingsScreen(QWidget):
         root.addWidget(_sep())
 
         # ── Previous Trajectory ──────────────────────────────────────
+        root.addWidget(_section_title("Previous Trajectory"))
+
         row = QHBoxLayout()
-        lbl = QLabel("Previous Trajectory")
-        lbl.setFont(QFont('Arial', 15))
-        lbl.setStyleSheet("color: #000000;")
-        lbl.setFixedWidth(220)
-        row.addWidget(lbl)
-        row.addSpacing(12)
+        row.setContentsMargins(12, 0, 0, 0)
         self.ghost_combo = QComboBox()
         self.ghost_combo.addItem("Individual", userData='individual')
         self.ghost_combo.addItem("Average",    userData='average')
+        self.ghost_combo.addItem("Max",        userData='max')
         self.ghost_combo.setFixedWidth(160)
         self.ghost_combo.setStyleSheet(
             "QComboBox { background:#fff; color:#000; border:1px solid #aaa;"
@@ -98,21 +103,45 @@ class GameSettingsScreen(QWidget):
             lambda i: setattr(self.state, 'ws_ghost_mode', self.ghost_combo.itemData(i)))
         row.addWidget(self.ghost_combo)
         row.addSpacing(16)
-        row.addWidget(_label("Individual: up to 5 past envelopes  |  Average: single running average"))
+        row.addWidget(_label("Individual: up to 5 past envelopes  |  Average: running mean  |  Max: running maximum"))
         row.addStretch()
         root.addLayout(row)
 
         root.addWidget(_sep())
 
-        # ── Guide Line ── single row ─────────────────────────────────
+        # ── Elevation Abort Duration ─────────────────────────────────
+        root.addWidget(_section_title("Elevation Abort Duration"))
+
+        row2 = QHBoxLayout()
+        row2.setContentsMargins(12, 0, 0, 0)
+        self.elev_dur_spin = QDoubleSpinBox()
+        self.elev_dur_spin.setRange(0.1, 10.0)
+        self.elev_dur_spin.setSingleStep(0.5)
+        self.elev_dur_spin.setDecimals(1)
+        self.elev_dur_spin.setValue(self.state.ws_elev_dur)
+        self.elev_dur_spin.setFixedWidth(80)
+        self.elev_dur_spin.setStyleSheet(SPIN)
+        self.elev_dur_spin.valueChanged.connect(lambda v: setattr(self.state, 'ws_elev_dur', v))
+        row2.addWidget(self.elev_dur_spin)
+        row2.addWidget(_label(" s"))
+        row2.addSpacing(16)
+        row2.addWidget(_label("Time below elevation threshold before trial aborts"))
+        row2.addStretch()
+        root.addLayout(row2)
+
+        root.addWidget(_sep())
+
+        # ── Guide Line ───────────────────────────────────────────────
+        root.addWidget(_section_title("Guide Line"))
+
         row3 = QHBoxLayout()
-        self.guide_chk = QCheckBox("Guide Line")
+        row3.setContentsMargins(12, 0, 0, 0)
+        self.guide_chk = QCheckBox("Enabled")
         self.guide_chk.setStyleSheet(CHKBOX)
         self.guide_chk.setChecked(self.state.ws_guide_line_on)
-        self.guide_chk.setFixedWidth(160)
         self.guide_chk.toggled.connect(lambda v: setattr(self.state, 'ws_guide_line_on', v))
         row3.addWidget(self.guide_chk)
-        row3.addSpacing(20)
+        row3.addSpacing(24)
 
         row3.addWidget(_label("R Speed:"))
         self.guide_spd_R = QDoubleSpinBox()
@@ -139,9 +168,8 @@ class GameSettingsScreen(QWidget):
         row3.addWidget(self.guide_spd_L)
         row3.addWidget(_label(" °/s"))
         row3.addSpacing(16)
-        row3.addWidget(_label("(R: left→right, L: right→left, sweeps 180°)"))
+        row3.addWidget(_label("(R: right→left, L: left→right, sweeps 180°)"))
         row3.addStretch()
         root.addLayout(row3)
 
         root.addStretch()
-

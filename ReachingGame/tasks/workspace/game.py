@@ -6,9 +6,10 @@ from PyQt5.QtWidgets import QWidget
 from PyQt5.QtCore import Qt, QTimer, QRect, QPoint
 from PyQt5.QtGui import QPainter, QColor, QBrush, QFont, QPen, QPolygon
 
-N_BINS        = 120   # 3° per bin
-SMOOTH_WIN    = 2     # bins on each side for smoothing
-SWITCH_DUR    = 2.0   # seconds for "Switch hand." display
+N_BINS          = 60    # 3° per bin, forward 180° only (bin 0 = 0°, bin 59 = 178.5°)
+SMOOTH_WIN      = 2     # bins on each side for smoothing
+SWITCH_DUR      = 2.0   # seconds for "Switch hand." display
+LATERAL_START_R = 2.5   # cm — radius of start circle (diameter 5 cm)
 
 
 def _shoelace(pts):
@@ -46,6 +47,7 @@ class GameScreen(QWidget):
         self.setCursor(Qt.BlankCursor)
 
         self._ws       = QRect()
+        self._cursor_x = 0.0
         self._cursor_y = 0.0
         self._cursor_z = 0.0
 
@@ -57,24 +59,30 @@ class GameScreen(QWidget):
         self._show_pts     = []
         self._show_timer   = 0.0
         self._switch_timer = 0.0
-        self._envelopes      = {'R': [], 'L': []}   # list of (bins, sy, sz)
-        self._pending_env    = None                 # (bins, arm, sy, sz) — added on advance
-        self._target_bnd     = None                 # (avg_bins, target_arm, testing_arm)
-        self._lateral_line_z = None                 # Z of horizontal reference line
-        self._last_area      = 0.0                  # area of most recent trial (cm²)
-        self._areas          = {'R': [], 'L': []}   # per-arm area history
+        self._envelopes         = {'R': [], 'L': []}   # list of (bins, sy, sz)
+        self._pending_env       = None                 # (bins, arm, sy, sz) — added on advance
+        self._target_bnd        = None                 # (avg_bins, target_arm, testing_arm)
+        self._lateral_lines     = {'R': None, 'L': None}  # Z of horizontal line per arm
+        self._lateral_start_pts = {'R': None, 'L': None}  # start circle position per arm
+        self._prev_setup        = {'R': None, 'L': None}  # (start_pt, lateral_line, lateral_start_pt) before reset
+        self._last_area         = 0.0                  # area of most recent trial (cm²)
+        self._areas             = {'R': [], 'L': []}   # per-arm area history
 
-        self._guide_angle = None   # degrees; None = inactive
+        self._guide_angle  = None   # degrees; None = inactive
+        self._x_below_dur  = 0.0    # seconds cursor has been below elev_min_cm
+        self._paused       = False
 
-        self._dt        = 0.008
+        self._dt        = 0.004
         self._last_tick = time.perf_counter()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(8)
+        self._timer.start(4)
 
     # ──────────────────────────────────────────────────── events
 
     def showEvent(self, e):
+        timer_ms = max(1, round(1000 / self.state.sample_rate_hz))
+        self._timer.start(timer_ms)
         self._phase        = 'idle'
         self._trials       = []
         self._trial_idx    = -1
@@ -83,27 +91,52 @@ class GameScreen(QWidget):
         self._show_pts     = []
         self._show_timer   = 0.0
         self._switch_timer = 0.0
-        self._envelopes      = {'R': [], 'L': []}
-        self._pending_env    = None
-        self._target_bnd     = None
-        self._lateral_line_z = None
-        self._last_area      = 0.0
-        self._areas          = {'R': [], 'L': []}
-        self._guide_angle    = None
+        self._envelopes         = {'R': [], 'L': []}
+        self._pending_env       = None
+        self._target_bnd        = None
+        self._lateral_lines     = {'R': None, 'L': None}
+        self._lateral_start_pts = {'R': None, 'L': None}
+        self._prev_setup        = {'R': None, 'L': None}
+        self._last_area         = 0.0
+        self._areas             = {'R': [], 'L': []}
+        self._guide_angle       = None
+        self._x_below_dur       = 0.0
+        self._paused            = False
         self._build_trials()
         if self._trials:
-            self._trial_idx = 0
+            self._trial_idx = max(0, min(self.state.start_trial - 1, len(self._trials) - 1))
             self._enter_trial()
 
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:
-            self.mw.show_screen('menu')
+            if self._paused:
+                self._paused = False
+                self.mw.show_screen('menu')
+            else:
+                self._paused = True
+            return
+        if self._paused:
+            if e.key() == Qt.Key_Space:
+                self._paused = False
+            return
+        if e.key() == Qt.Key_Backspace:
+            if self._phase == 'recording':
+                self._abort_to_wait_start()
         elif e.key() == Qt.Key_Space:
-            self._on_space()
+            shift = bool(e.modifiers() & Qt.ShiftModifier)
+            if shift:
+                self._on_shift_space()
+            else:
+                self._on_space()
 
     def mouseMoveEvent(self, e):
         if self.liberty.use_mouse and self._ws.width() > 0:
             self._cursor_y, self._cursor_z = self._to_cm(e.x(), e.y())
+
+    def wheelEvent(self, e):
+        if self.liberty.use_mouse:
+            delta = e.angleDelta().y() / 120  # notches
+            self._cursor_x = round(self._cursor_x + delta * 0.5, 1)
 
     # ──────────────────────────────────────────────────── tick
 
@@ -112,12 +145,23 @@ class GameScreen(QWidget):
         self._dt = now - self._last_tick
         self._last_tick = now
 
+        if self._paused:
+            self.update()
+            return
+
         if not self.liberty.use_mouse:
             self._read_sensor()
 
         if self._phase == 'recording':
+            trial = self._trials[self._trial_idx]
             self._traj.append((self._cursor_y, self._cursor_z))
             self._update_guide_angle()
+            if trial['elev_min_cm'] > 0 and self._cursor_x < trial['elev_min_cm']:
+                self._x_below_dur += self._dt
+                if self._x_below_dur >= self.state.ws_elev_dur:
+                    self._abort_to_wait_start()
+            else:
+                self._x_below_dur = 0.0
 
         elif self._phase == 'show_traj':
             self._show_timer += self._dt
@@ -137,7 +181,7 @@ class GameScreen(QWidget):
         arm    = self._trials[self._trial_idx]['arm']
         result = self._read_hand(arm)
         if result:
-            self._cursor_y, self._cursor_z = result
+            self._cursor_x, self._cursor_y, self._cursor_z = result
 
     def _read_hand(self, arm):
         from digitizer import track_mcp
@@ -150,8 +194,8 @@ class GameScreen(QWidget):
                  if st.dig_mode >= 1 else None
         if offset is not None:
             pos = track_mcp(s, offset)
-            return pos[1] - st.sensor_y_offset, pos[2] - st.sensor_z_offset
-        return s.y * 2.54 - st.sensor_y_offset, s.z * 2.54 - st.sensor_z_offset
+            return pos[0] - st.sensor_x_offset, pos[1] - st.sensor_y_offset, pos[2] - st.sensor_z_offset
+        return s.x * 2.54 - st.sensor_x_offset, s.y * 2.54 - st.sensor_y_offset, s.z * 2.54 - st.sensor_z_offset
 
     # ──────────────────────────────────────────────────── session build
 
@@ -166,15 +210,20 @@ class GameScreen(QWidget):
                 'arm':       scr.table.item(r, 1).text().strip().upper(),
                 'display_s': float(scr.table.item(r, 2).text()),
                 'draw':      int(scr.table.item(r, 3).text()),
+                'elev_min_cm':  float(scr.table.item(r, 4).text()),
             })
 
     # ──────────────────────────────────────────────────── state machine
 
     def _enter_trial(self):
         arm = self._trials[self._trial_idx]['arm']
-        self._traj           = []
-        self._lateral_line_z = None
-        self._phase = 'set_start' if self._start_pts[arm] is None else 'set_lateral'
+        self._traj = []
+        if self._start_pts[arm] is None:
+            self._phase = 'set_start'
+        elif self._lateral_lines[arm] is None:
+            self._phase = 'set_lateral'
+        else:
+            self._phase = 'wait_start'
 
     def _on_space(self):
         if self._phase == 'set_start':
@@ -185,14 +234,63 @@ class GameScreen(QWidget):
 
         elif self._phase == 'set_lateral':
             arm = self._trials[self._trial_idx]['arm']
-            self._lateral_line_z = self._cursor_z
-            self._guide_angle    = 180.0 if arm == 'R' else 0.0
+            self._lateral_lines[arm]     = self._cursor_z
+            self._lateral_start_pts[arm] = (self._cursor_y, self._cursor_z)
+            # rebase existing envelopes to new center (bins/shape unchanged, origin updated)
+            new_sy = self._start_pts[arm][0]
+            new_sz = self._cursor_z
+            self._envelopes[arm] = [
+                (bins, new_sy, new_sz) for bins, _, _ in self._envelopes[arm]
+            ]
+            self._phase = 'wait_start'
+            _beep(660, 100)
+
+        elif self._phase == 'wait_start':
+            if not self._in_start_circle():
+                return
+            trial = self._trials[self._trial_idx]
+            if trial['elev_min_cm'] > 0 and self._cursor_x < trial['elev_min_cm']:
+                return
+            arm = trial['arm']
+            self._guide_angle = 0.0 if arm == 'R' else 180.0
             self._phase = 'recording'
             self._traj  = [(self._cursor_y, self._cursor_z)]
             _beep(880, 80)
 
         elif self._phase == 'recording':
             self._end_recording()
+
+    def _abort_to_wait_start(self):
+        self._guide_angle = None
+        self._traj        = []
+        self._x_below_dur = 0.0
+        self._phase       = 'wait_start'
+        _beep(300, 150)
+
+    def _in_start_circle(self):
+        arm = self._trials[self._trial_idx]['arm']
+        sp  = self._lateral_start_pts[arm]
+        if sp is None:
+            return False
+        cy, cz = sp
+        return (self._cursor_y - cy)**2 + (self._cursor_z - cz)**2 <= LATERAL_START_R**2
+
+    def _on_shift_space(self):
+        if self._phase not in ('wait_start', 'set_start', 'set_lateral'):
+            return
+        arm = self._trials[self._trial_idx]['arm']
+        # save previous setup for ghost display
+        if self._start_pts[arm] is not None:
+            self._prev_setup[arm] = (
+                self._start_pts[arm],
+                self._lateral_lines[arm],
+                self._lateral_start_pts[arm],
+            )
+        self._start_pts[arm]         = None
+        self._lateral_lines[arm]     = None
+        self._lateral_start_pts[arm] = None
+        self._phase = 'set_start'
+        _beep(440, 120)
 
     def _update_guide_angle(self):
         if self._guide_angle is None:
@@ -201,19 +299,22 @@ class GameScreen(QWidget):
         speed = self.state.ws_guide_speed_R if arm == 'R' else self.state.ws_guide_speed_L
         delta = speed * self._dt
         if arm == 'R':
-            self._guide_angle = max(0.0, self._guide_angle - delta)
+            self._guide_angle = min(180.0, self._guide_angle + delta)  # 0→180 (right→left)
         else:
-            self._guide_angle = min(180.0, self._guide_angle + delta)
+            self._guide_angle = max(0.0, self._guide_angle - delta)    # 180→0 (left→right)
 
     def _end_recording(self):
         self._guide_angle = None
         self._show_pts   = list(self._traj)
         self._show_timer = 0.0
-        arm    = self._trials[self._trial_idx]['arm']
-        sy, sz = self._start_pts[arm]
-        bins   = self._compute_bins(self._traj, sy, sz)
+        arm = self._trials[self._trial_idx]['arm']
+        sy  = self._start_pts[arm][0]
+        lz  = self._lateral_lines[arm]
+        sz  = lz if lz is not None else self._start_pts[arm][1]  # center Z = lateral line
+        traj_clipped = [(y, z) for y, z in self._traj if lz is None or z >= lz]
+        bins   = self._compute_bins(traj_clipped, sy, sz)
         self._pending_env = (bins, arm, sy, sz)
-        pts = self._bins_to_pts(bins, sy, sz)
+        pts = self._bins_to_pts(bins, sy, sz, close_z=lz)
         self._last_area = _shoelace(pts)
         self._areas[arm].append(self._last_area)
         self._phase = 'show_traj'
@@ -241,19 +342,45 @@ class GameScreen(QWidget):
 
     def _compute_bins(self, traj, sy, sz):
         bins = [0.0] * N_BINS
-        for y, z in traj:
-            dy = y - sy
-            dz = z - sz
-            r  = math.sqrt(dy * dy + dz * dz)
+        BIN_RAD = math.pi / N_BINS  # 3° per bin
+
+        def _update(y, z):
+            dy, dz = y - sy, z - sz
+            if dz < 0:
+                return
+            r = math.sqrt(dy * dy + dz * dz)
             if r < 0.3:
-                continue
-            idx = int((math.atan2(dz, dy) + math.pi) / (2 * math.pi) * N_BINS) % N_BINS
+                return
+            idx = min(int(math.atan2(dz, dy) / math.pi * N_BINS), N_BINS - 1)
             if r > bins[idx]:
                 bins[idx] = r
+
+        for k, (y, z) in enumerate(traj):
+            _update(y, z)
+            if k == 0:
+                continue
+            py, pz = traj[k - 1]
+            # interpolate along the segment so no bin is skipped
+            dy1, dz1 = py - sy, pz - sz
+            dy2, dz2 = y  - sy, z  - sz
+            r1 = math.sqrt(dy1 * dy1 + dz1 * dz1)
+            r2 = math.sqrt(dy2 * dy2 + dz2 * dz2)
+            if r1 >= 0.3 and r2 >= 0.3:
+                a1    = math.atan2(max(dz1, 0.0), dy1)
+                a2    = math.atan2(max(dz2, 0.0), dy2)
+                steps = max(2, int(abs(a2 - a1) / BIN_RAD) + 2)
+            else:
+                steps = 4
+            for t in range(1, steps):
+                fy = py + (y - py) * t / steps
+                fz = pz + (z - pz) * t / steps
+                _update(fy, fz)
+
         sm = [0.0] * N_BINS
         w  = SMOOTH_WIN
         for i in range(N_BINS):
-            sm[i] = sum(bins[(i + j - w) % N_BINS] for j in range(2 * w + 1)) / (2 * w + 1)
+            vals = [bins[max(0, min(N_BINS - 1, i + j))] for j in range(-w, w + 1)]
+            sm[i] = sum(vals) / len(vals)
         return sm
 
     def _build_target_boundary(self, target_arm, testing_arm):
@@ -264,12 +391,13 @@ class GameScreen(QWidget):
         avg  = [sum(e[0][i] for e in env_list) / len(env_list) for i in range(N_BINS)]
         self._target_bnd = (avg, target_arm, testing_arm)
 
-    def _bins_to_pts(self, bins, sy, sz, mirror_start=None):
+    def _bins_to_pts(self, bins, sy, sz, mirror_start=None, close_z=None):
         pts = []
+        center_y = mirror_start[0] if mirror_start is not None else sy
         for i, r in enumerate(bins):
             if r < 0.3:
                 continue
-            angle = -math.pi + (i + 0.5) * 2 * math.pi / N_BINS
+            angle = (i + 0.5) * math.pi / N_BINS  # 1.5° … 178.5°
             dy = r * math.cos(angle)
             dz = r * math.sin(angle)
             if mirror_start is not None:
@@ -277,6 +405,13 @@ class GameScreen(QWidget):
                 pts.append((my - dy, mz + dz))
             else:
                 pts.append((sy + dy, sz + dz))
+        # 177-180° end → drop to lateral line → center → 1-3° end x on lateral
+        # auto-close: (first_arc_x, close_z) → pts[0], nearly vertical
+        if close_z is not None and len(pts) >= 2:
+            first_y = pts[0][0]
+            pts.append((pts[-1][0], close_z))
+            pts.append((center_y,   close_z))
+            pts.append((first_y,    close_z))
         return pts
 
     # ──────────────────────────────────────────────────── coordinates
@@ -301,6 +436,12 @@ class GameScreen(QWidget):
         z  = s.WORKSPACE_Z_MIN + (self._ws.bottom() - py) / max(self._ws.height(), 1) * dz
         return y, z
 
+    def _r_px(self, r_cm):
+        s  = self.state
+        ry = self._ws.width()  / max(s.WORKSPACE_Y_MAX - s.WORKSPACE_Y_MIN, 0.01)
+        rz = self._ws.height() / max(s.WORKSPACE_Z_MAX - s.WORKSPACE_Z_MIN, 0.01)
+        return max(1, int(r_cm * ry)), max(1, int(r_cm * rz))
+
     # ──────────────────────────────────────────────────── drawing
 
     def paintEvent(self, e):
@@ -315,7 +456,7 @@ class GameScreen(QWidget):
             return
 
         if self._phase == 'done':
-            self._draw_text(p, "Session complete!\nPress ESC to return to menu.")
+            self._draw_done_screen(p)
             return
 
         if self._phase == 'switch_hand':
@@ -324,63 +465,157 @@ class GameScreen(QWidget):
 
         trial = self._trials[self._trial_idx]
         arm   = trial['arm']
+        lz    = self._lateral_lines[arm]
+
+        # ── clipped region: above lateral line ──
+        if lz is not None:
+            _, line_y = self._to_screen(0, lz)
+            p.setClipRect(0, 0, self.width(), line_y)
 
         self._draw_ghosts(p, arm)
         self._draw_target_boundary(p, arm)
-        self._draw_lateral_line(p)
-        self._draw_center_line(p, arm)
-
-        if self._phase == 'set_start':
-            self._draw_instruction(p, "Position your center, then press SPACE.")
-        elif self._phase == 'set_lateral':
-            self._draw_instruction(p, "Extend arm to max lateral, then press SPACE.")
-        elif self._phase == 'recording':
-            if trial['draw']:
-                self._draw_live_traj(p)
-            self._draw_guide_line(p)
-            self._draw_instruction(p, "Follow the guideline. Reach as far as possible.")
+        if self._phase == 'recording' and trial['draw']:
+            self._draw_live_traj(p)
         elif self._phase == 'show_traj':
             self._draw_show_traj(p)
-            self._draw_area_info(p, arm)
+
+        if lz is not None:
+            p.setClipping(False)
+        # ── end clipped region ──
+
+        self._draw_lateral_line(p, arm)
+        self._draw_center_line(p, arm)
+        self._draw_lateral_start_circle(p, arm)
+
+        if self._phase == 'set_start':
+            self._draw_prev_setup_ghost(p, arm)
+            self._draw_instruction(p, "Position your center, then press SPACE.")
+        elif self._phase == 'set_lateral':
+            self._draw_prev_setup_ghost(p, arm)
+            self._draw_instruction(p, "Extend arm to max lateral, then press SPACE.")
+        elif self._phase == 'wait_start':
+            trial = self._trials[self._trial_idx]
+            elev_fail = trial['elev_min_cm'] > 0 and self._cursor_x < trial['elev_min_cm']
+            if self._in_start_circle():
+                if elev_fail:
+                    self._draw_instruction(p, "Raise your hand!")
+                else:
+                    self._draw_instruction(p, "Ready for the cue.")
+            else:
+                self._draw_instruction(p, "Return to start position.")
+                if elev_fail:
+                    self._draw_warning(p, "Raise your hand!")
+        elif self._phase == 'recording':
+            self._draw_guide_line(p)
+            trial = self._trials[self._trial_idx]
+            self._draw_instruction(p, "Follow the guideline. Reach as far as possible.")
+            if trial['elev_min_cm'] > 0 and self._cursor_x < trial['elev_min_cm']:
+                self._draw_warning(p, "Raise your hand!")
+        elif self._phase == 'show_traj':
+            self._draw_trial_area(p)
 
         self._draw_cursor(p)
         self._draw_counter(p, arm)
+        self._draw_avg_info(p)
+
+        if self._paused:
+            self._draw_pause_overlay(p)
 
     def _draw_cursor(self, p):
         sx, sy = self._to_screen(self._cursor_y, self._cursor_z)
-        p.setBrush(QBrush(QColor(220, 30, 30)))
+        trial = self._trials[self._trial_idx] if 0 <= self._trial_idx < len(self._trials) else None
+        below = (trial and trial['elev_min_cm'] > 0 and self._cursor_x < trial['elev_min_cm'])
+        color = QColor(220, 30, 30) if below else QColor(30, 200, 80)
+        p.setBrush(QBrush(color))
         p.setPen(Qt.NoPen)
         p.drawEllipse(QPoint(sx, sy), 7, 7)
+        if self.liberty.use_mouse:
+            p.setPen(QColor(200, 200, 200))
+            p.setFont(QFont('Arial', 10))
+            p.drawText(sx + 10, sy + 14, f"x={self._cursor_x:.1f} cm")
+
+    def _draw_prev_setup_ghost(self, p, arm):
+        prev = self._prev_setup[arm]
+        if prev is None:
+            return
+        start_pt, lateral_z, lateral_start_pt = prev
+        alpha = 77  # 0.3 * 255
+
+        # ghost center line
+        cy, cz = start_pt
+        x1, y1 = self._to_screen(cy, cz + 2.0)
+        x2, y2 = self._to_screen(cy, self.state.WORKSPACE_Z_MIN)
+        p.setPen(QPen(QColor(255, 255, 255, alpha), 2))
+        p.drawLine(x1, y1, x2, y2)
+
+        # ghost lateral line
+        if lateral_z is not None:
+            _, line_y = self._to_screen(0, lateral_z)
+            p.setPen(QPen(QColor(160, 160, 160, alpha), 1))
+            p.drawLine(0, line_y, self.width(), line_y)
+
+        # ghost start circle
+        if lateral_start_pt is not None:
+            sy_c, sz_c = lateral_start_pt
+            sx, sy_s = self._to_screen(sy_c, sz_c)
+            rx, rz   = self._r_px(LATERAL_START_R)
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(QColor(255, 255, 255, alpha), 2))
+            p.drawEllipse(QPoint(sx, sy_s), rx, rz)
 
     def _draw_center_line(self, p, arm):
         sp = self._start_pts[arm]
         if sp is None:
             return
         cy, cz = sp
-        x1, y1 = self._to_screen(cy, cz - 2.5)
-        x2, y2 = self._to_screen(cy, cz + 2.5)
+        x1, y1 = self._to_screen(cy, cz + 2.0)                  # 2 cm above center
+        x2, y2 = self._to_screen(cy, self.state.WORKSPACE_Z_MIN) # down to workspace bottom
         p.setPen(QPen(QColor(255, 255, 255), 2))
         p.drawLine(x1, y1, x2, y2)
 
-    def _draw_lateral_line(self, p):
-        if self._lateral_line_z is None:
+    def _draw_lateral_line(self, p, arm):
+        lz = self._lateral_lines[arm]
+        if lz is None:
             return
-        _, line_y = self._to_screen(0, self._lateral_line_z)
+        _, line_y = self._to_screen(0, lz)
         p.setPen(QPen(QColor(160, 160, 160), 1))
         p.drawLine(0, line_y, self.width(), line_y)
+
+    def _draw_lateral_start_circle(self, p, arm):
+        sp = self._lateral_start_pts[arm]
+        if sp is None:
+            return
+        cy, cz = sp
+        sx, sy_s = self._to_screen(cy, cz)
+        rx, rz   = self._r_px(LATERAL_START_R)
+        inside   = ((self._cursor_y - cy)**2 + (self._cursor_z - cz)**2
+                    <= LATERAL_START_R**2)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QColor(255, 255, 255), 4 if inside else 2))
+        p.drawEllipse(QPoint(sx, sy_s), rx, rz)
 
     def _draw_ghosts(self, p, arm):
         env_list = self._envelopes[arm]
         if not env_list:
             return
         color = QColor(255, 255, 255, 128)
+        lz    = self._lateral_lines[arm]
 
         if self.state.ws_ghost_mode == 'average':
-            # Single ghost: running average of all stored envelopes
             n   = len(env_list)
             avg = [sum(e[0][i] for e in env_list) / n for i in range(N_BINS)]
             sy, sz = env_list[-1][1], env_list[-1][2]
-            pts = self._bins_to_pts(avg, sy, sz)
+            pts = self._bins_to_pts(avg, sy, sz, close_z=lz)
+            if len(pts) < 3:
+                return
+            poly = QPolygon([QPoint(*self._to_screen(y, z)) for y, z in pts])
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(color, 1))
+            p.drawPolygon(poly)
+        elif self.state.ws_ghost_mode == 'max':
+            mx  = [max(e[0][i] for e in env_list) for i in range(N_BINS)]
+            sy, sz = env_list[-1][1], env_list[-1][2]
+            pts = self._bins_to_pts(mx, sy, sz, close_z=lz)
             if len(pts) < 3:
                 return
             poly = QPolygon([QPoint(*self._to_screen(y, z)) for y, z in pts])
@@ -388,11 +623,10 @@ class GameScreen(QWidget):
             p.setPen(QPen(color, 1))
             p.drawPolygon(poly)
         else:
-            # Individual: up to 5 most recent
             n       = len(env_list)
             start_i = max(0, n - 5)
             for bins, sy, sz in env_list[start_i:]:
-                pts = self._bins_to_pts(bins, sy, sz)
+                pts = self._bins_to_pts(bins, sy, sz, close_z=lz)
                 if len(pts) < 3:
                     continue
                 poly = QPolygon([QPoint(*self._to_screen(y, z)) for y, z in pts])
@@ -406,10 +640,12 @@ class GameScreen(QWidget):
         avg_bins, _ta, testing_arm = self._target_bnd
         if arm != testing_arm:
             return
-        sp = self._start_pts[testing_arm]
-        if sp is None:
+        if self._start_pts[testing_arm] is None:
             return
-        pts = self._bins_to_pts(avg_bins, 0, 0, mirror_start=sp)
+        lz  = self._lateral_lines[testing_arm]
+        sp_y = self._start_pts[testing_arm][0]
+        mirror_pt = (sp_y, lz) if lz is not None else self._start_pts[testing_arm]
+        pts = self._bins_to_pts(avg_bins, 0, 0, mirror_start=mirror_pt, close_z=lz)
         if len(pts) < 3:
             return
         poly = QPolygon([QPoint(*self._to_screen(y, z)) for y, z in pts])
@@ -437,6 +673,11 @@ class GameScreen(QWidget):
             x2, y2 = self._to_screen(*self._show_pts[i])
             p.drawLine(x1, y1, x2, y2)
 
+    def _draw_warning(self, p, text):
+        p.setPen(QColor(255, 80, 80))
+        p.setFont(QFont('Arial', 22, QFont.Bold))
+        p.drawText(self.rect().adjusted(0, 80, 0, 0), Qt.AlignTop | Qt.AlignHCenter, text)
+
     def _draw_instruction(self, p, text):
         p.setPen(QColor(200, 200, 200))
         p.setFont(QFont('Arial', 24, QFont.Bold))
@@ -448,27 +689,44 @@ class GameScreen(QWidget):
         p.setFont(QFont('Arial', 14))
         p.drawText(20, 30, f"Trial  {self._trial_idx + 1} / {len(self._trials)}   Arm: {arm_text}")
 
-    def _draw_area_info(self, p, arm):
-        # Top-center: current trial area
+    def _avg_str(self, a):
+        vals = self._areas[a]
+        if not vals:
+            return "—"
+        return f"{sum(vals) / len(vals):.1f} cm²  (n={len(vals)})"
+
+    def _draw_trial_area(self, p):
         p.setPen(QColor(220, 220, 220))
         p.setFont(QFont('Arial', 20, QFont.Bold))
         p.drawText(self.rect().adjusted(0, 10, 0, 0),
                    Qt.AlignTop | Qt.AlignHCenter,
                    f"Area: {self._last_area:.1f} cm²")
 
-        # Top-right: per-arm running averages
-        def _avg_str(a):
-            vals = self._areas[a]
-            if not vals:
-                return "—"
-            return f"{sum(vals) / len(vals):.1f} cm²"
-
-        lines = f"R avg:  {_avg_str('R')}\nL avg:  {_avg_str('L')}"
+    def _draw_avg_info(self, p):
+        lines = f"R avg:  {self._avg_str('R')}\nL avg:  {self._avg_str('L')}"
         p.setPen(QColor(160, 160, 160))
         p.setFont(QFont('Arial', 14))
         p.drawText(self.rect().adjusted(0, 10, -20, 0),
                    Qt.AlignTop | Qt.AlignRight,
                    lines)
+
+    def _draw_done_screen(self, p):
+        self._draw_text(p, "Session complete!")
+        # prominent results below center
+        def line(a, label):
+            vals = self._areas[a]
+            if not vals:
+                return f"{label}:  —"
+            return f"{label}:  {sum(vals)/len(vals):.1f} cm²  (n={len(vals)})"
+        results = f"{line('R', 'R avg')}\n{line('L', 'L avg')}"
+        p.setPen(QColor(200, 200, 200))
+        p.setFont(QFont('Arial', 26, QFont.Bold))
+        p.drawText(self.rect().adjusted(0, 80, 0, 0),
+                   Qt.AlignTop | Qt.AlignHCenter, results)
+        p.setPen(QColor(120, 120, 120))
+        p.setFont(QFont('Arial', 16))
+        p.drawText(self.rect().adjusted(0, 0, 0, -30),
+                   Qt.AlignBottom | Qt.AlignHCenter, "Press ESC to return to menu.")
 
     def _draw_switch(self, p):
         if 0 <= self._trial_idx < len(self._trials):
@@ -482,16 +740,36 @@ class GameScreen(QWidget):
         if not self.state.ws_guide_line_on or self._guide_angle is None:
             return
         arm = self._trials[self._trial_idx]['arm']
-        sp  = self._start_pts[arm]
-        if sp is None:
+        if self._start_pts[arm] is None or self._lateral_lines[arm] is None:
             return
-        sx, sy_s = self._to_screen(*sp)
+        oy = self._start_pts[arm][0]          # envelope center Y
+        oz = self._lateral_lines[arm]         # envelope center Z (lateral line)
+        sx, sy_s = self._to_screen(oy, oz)
         angle_rad = math.radians(self._guide_angle)
-        far_y = sp[0] + math.cos(angle_rad) * 300
-        far_z = sp[1] + math.sin(angle_rad) * 300
+        far_y = oy + math.cos(angle_rad) * 300
+        far_z = oz + math.sin(angle_rad) * 300
         ex, ey = self._to_screen(far_y, far_z)
         p.setPen(QPen(QColor(200, 200, 200, 160), 1))
         p.drawLine(sx, sy_s, ex, ey)
+
+    def _draw_pause_overlay(self, p):
+        from PyQt5.QtCore import QRect as _QRect
+        p.fillRect(self.rect(), QColor(0, 0, 0, 160))
+        box_w, box_h = 260, 100
+        cx = (self.width()  - box_w) // 2
+        cy = (self.height() - box_h) // 2
+        p.setBrush(QBrush(QColor(30, 30, 30)))
+        p.setPen(QPen(QColor(180, 180, 180), 2))
+        p.drawRect(cx, cy, box_w, box_h)
+        # blink "PAUSE" at ~2 Hz
+        if int(time.perf_counter() * 2) % 2 == 0:
+            p.setPen(QColor(220, 220, 220))
+            p.setFont(QFont('Arial', 32, QFont.Bold))
+            p.drawText(_QRect(cx, cy, box_w, box_h), Qt.AlignCenter, "PAUSE")
+        p.setPen(QColor(180, 180, 180))
+        p.setFont(QFont('Arial', 13, QFont.Bold))
+        p.drawText(_QRect(0, cy + box_h + 14, self.width(), 24), Qt.AlignCenter, "SPACE to resume")
+        p.drawText(_QRect(0, cy + box_h + 40, self.width(), 24), Qt.AlignCenter, "ESC to end the session")
 
     def _draw_text(self, p, text):
         p.setPen(QColor(220, 220, 220))
