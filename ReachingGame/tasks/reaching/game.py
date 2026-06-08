@@ -56,6 +56,7 @@ class GameScreen(QWidget):
         self._last_cursor_y    = 0.0
         self._last_cursor_z    = 0.0
 
+        self._paused    = False
         self._dt        = 0.004
         self._last_tick = time.perf_counter()
 
@@ -68,13 +69,25 @@ class GameScreen(QWidget):
     def showEvent(self, e):
         self._timer.start(max(1, round(1000 / self.state.sample_rate_hz)))
         self._phase    = 'calibration'
+        self._paused   = False
         self._cursor_y = self.state.WORKSPACE_Y_MAX / 2
         self._cursor_z = self.state.WORKSPACE_Z_MAX / 2
 
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:
-            self.mw.show_screen('menu')
-        elif e.key() == Qt.Key_Space and self._phase == 'calibration':
+            if self._paused:
+                self._paused = False
+                self.mw.show_screen('menu')
+            elif self._phase == 'running':
+                self._paused = True
+            else:
+                self.mw.show_screen('menu')
+            return
+        if self._paused:
+            if e.key() == Qt.Key_Space:
+                self._paused = False
+            return
+        if e.key() == Qt.Key_Space and self._phase == 'calibration':
             self._confirm_calibration()
 
     def mouseMoveEvent(self, e):
@@ -88,6 +101,9 @@ class GameScreen(QWidget):
         now = time.perf_counter()
         self._dt = now - self._last_tick
         self._last_tick = now
+        if self._paused:
+            self.update()
+            return
         if not self.liberty.use_mouse:
             self._read_sensor()
         if self._phase == 'running' and self._t_state:
@@ -282,6 +298,9 @@ class GameScreen(QWidget):
         elif self._phase == 'done':
             self._draw_done(p)
 
+        if self._paused:
+            self._draw_pause_overlay(p)
+
     def _draw_cursor(self, p):
         if not self._cursor_in_ws:
             return
@@ -350,9 +369,11 @@ class GameScreen(QWidget):
             p.drawText(self.rect().adjusted(0, 20, 0, 0), Qt.AlignTop | Qt.AlignHCenter, outcome_text)
 
         # Trial counter
+        scale = self.state.env_scale()
+        scale_str = f"{scale:.2f}".rstrip('0').rstrip('.')
         p.setPen(QColor(160, 160, 160))
         p.setFont(QFont('Arial', 14))
-        p.drawText(20, 30, f"Trial  {self._trial_idx + 1} / {len(self._trials)}")
+        p.drawText(20, 30, f"{scale_str}×   Trial  {self._trial_idx + 1} / {len(self._trials)}")
 
         # Live cursor (not during Feedback)
         if self._t_state != 'Feedback':
@@ -363,3 +384,21 @@ class GameScreen(QWidget):
         p.setFont(QFont('Arial', 30, QFont.Bold))
         p.drawText(self.rect(), Qt.AlignCenter,
                    "Session complete!\nPress ESC to return to menu.")
+
+    def _draw_pause_overlay(self, p):
+        from PyQt5.QtCore import QRect as _QRect
+        p.fillRect(self.rect(), QColor(0, 0, 0, 160))
+        box_w, box_h = 260, 100
+        cx = (self.width()  - box_w) // 2
+        cy = (self.height() - box_h) // 2
+        p.setBrush(QBrush(QColor(30, 30, 30)))
+        p.setPen(QPen(QColor(180, 180, 180), 2))
+        p.drawRect(cx, cy, box_w, box_h)
+        if int(time.perf_counter() * 2) % 2 == 0:
+            p.setPen(QColor(220, 220, 220))
+            p.setFont(QFont('Arial', 32, QFont.Bold))
+            p.drawText(_QRect(cx, cy, box_w, box_h), Qt.AlignCenter, "PAUSE")
+        p.setPen(QColor(180, 180, 180))
+        p.setFont(QFont('Arial', 13, QFont.Bold))
+        p.drawText(_QRect(0, cy + box_h + 14, self.width(), 24), Qt.AlignCenter, "SPACE to resume")
+        p.drawText(_QRect(0, cy + box_h + 40, self.width(), 24), Qt.AlignCenter, "ESC to end the session")

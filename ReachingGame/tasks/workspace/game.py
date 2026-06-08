@@ -507,6 +507,7 @@ class GameScreen(QWidget):
                     self._draw_warning(p, "Raise your hand!")
         elif self._phase == 'recording':
             self._draw_guide_line(p)
+            self._draw_cursor_circle(p, arm)
             trial = self._trials[self._trial_idx]
             self._draw_instruction(p, "Follow the guideline. Reach as far as possible.")
             if trial['elev_min_cm'] > 0 and self._cursor_x < trial['elev_min_cm']:
@@ -685,9 +686,11 @@ class GameScreen(QWidget):
 
     def _draw_counter(self, p, arm):
         arm_text = "Right" if arm == 'R' else "Left"
+        scale = self.state.env_scale()
+        scale_str = f"{scale:.2f}".rstrip('0').rstrip('.')
         p.setPen(QColor(160, 160, 160))
         p.setFont(QFont('Arial', 14))
-        p.drawText(20, 30, f"Trial  {self._trial_idx + 1} / {len(self._trials)}   Arm: {arm_text}")
+        p.drawText(20, 30, f"{scale_str}×   Trial  {self._trial_idx + 1} / {len(self._trials)}   Arm: {arm_text}")
 
     def _avg_str(self, a):
         vals = self._areas[a]
@@ -736,21 +739,60 @@ class GameScreen(QWidget):
             msg = "Switch hand."
         self._draw_text(p, msg)
 
+    def _draw_cursor_circle(self, p, arm):
+        if not self.state.ws_shadow_circle_on:
+            return
+        oz = self._lateral_lines[arm]
+        if oz is None:
+            return
+        cx, cy = self._to_screen(self._cursor_y, oz)
+        rx, rz = self._r_px(LATERAL_START_R * 0.72)
+        p.setBrush(QBrush(QColor(50, 200, 80)))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(QPoint(cx, cy), rx, rz)
+
     def _draw_guide_line(self, p):
-        if not self.state.ws_guide_line_on or self._guide_angle is None:
+        if self._guide_angle is None:
             return
         arm = self._trials[self._trial_idx]['arm']
         if self._start_pts[arm] is None or self._lateral_lines[arm] is None:
             return
-        oy = self._start_pts[arm][0]          # envelope center Y
-        oz = self._lateral_lines[arm]         # envelope center Z (lateral line)
-        sx, sy_s = self._to_screen(oy, oz)
+        oy = self._start_pts[arm][0]
+        oz = self._lateral_lines[arm]
         angle_rad = math.radians(self._guide_angle)
-        far_y = oy + math.cos(angle_rad) * 300
-        far_z = oz + math.sin(angle_rad) * 300
-        ex, ey = self._to_screen(far_y, far_z)
-        p.setPen(QPen(QColor(200, 200, 200, 160), 1))
-        p.drawLine(sx, sy_s, ex, ey)
+
+        if self.state.ws_guide_line_on:
+            sx, sy_s = self._to_screen(oy, oz)
+            far_y = oy + math.cos(angle_rad) * 300
+            far_z = oz + math.sin(angle_rad) * 300
+            ex, ey = self._to_screen(far_y, far_z)
+            p.setPen(QPen(QColor(200, 200, 200, 160), 1))
+            p.drawLine(sx, sy_s, ex, ey)
+
+        lsp = self._lateral_start_pts[arm]
+        if lsp is None:
+            return
+        dy = lsp[0] - oy
+        dz = lsp[1] - oz
+        dist = math.sqrt(dy * dy + dz * dz)
+        if dist <= 0.1:
+            return
+
+        if self.state.ws_guide_line_on:
+            dot_y = oy + math.cos(angle_rad) * dist
+            dot_z = oz + math.sin(angle_rad) * dist
+            dx, dy_s = self._to_screen(dot_y, dot_z)
+            p.setBrush(QBrush(QColor(255, 255, 255)))
+            p.setPen(Qt.NoPen)
+            p.drawEllipse(QPoint(dx, dy_s), 6, 6)
+
+        if self.state.ws_shadow_circle_on:
+            shadow_y = oy + math.cos(angle_rad) * dist
+            shx, shy = self._to_screen(shadow_y, oz)
+            rx, rz = self._r_px(LATERAL_START_R * 0.8)
+            p.setBrush(QBrush(QColor(255, 255, 255)))
+            p.setPen(Qt.NoPen)
+            p.drawEllipse(QPoint(shx, shy), rx, rz)
 
     def _draw_pause_overlay(self, p):
         from PyQt5.QtCore import QRect as _QRect

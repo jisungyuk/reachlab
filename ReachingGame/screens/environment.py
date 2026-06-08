@@ -66,6 +66,12 @@ class WorkspaceCanvas(QWidget):
         self._res_ow      = 0.0
         self._real_mon_w  = 0.0   # physical monitor width in cm (from set_monitor)
 
+        self._cursor_y      = 0.0
+        self._cursor_z      = 0.0
+        self._cursor_active = False
+        self._source_y      = None
+        self._source_z      = None
+
     # ── public ───────────────────────────────────────────
 
     def set_desk(self, w, h):
@@ -135,16 +141,16 @@ class WorkspaceCanvas(QWidget):
 
     def _to_px(self, cx, cy):
         s, ox, oy = self._sao()
-        return ox + cx * s, oy + cy * s
+        return ox + cx * s, oy + (self._desk_h - cy) * s
 
     def _to_cm(self, px, py):
         s, ox, oy = self._sao()
-        return (px - ox) / s, (py - oy) / s
+        return (px - ox) / s, self._desk_h - (py - oy) / s
 
     def _handle_px(self):
         s, ox, oy = self._sao()
         hx = ox + (self._rx + self._rw) * s
-        hy = oy + (self._ry + self._rh) * s
+        hy = oy + (self._desk_h - self._ry) * s
         h  = HANDLE_PX
         return hx - h, hy - h, hx + h, hy + h
 
@@ -154,9 +160,10 @@ class WorkspaceCanvas(QWidget):
 
     def _in_rect(self, px, py):
         s, ox, oy = self._sao()
-        mx = ox + self._rx * s
-        my = oy + self._ry * s
-        return mx <= px <= mx + self._rw * s and my <= py <= my + self._rh * s
+        mx     = ox + self._rx * s
+        my_top = oy + (self._desk_h - self._ry - self._rh) * s
+        my_bot = oy + (self._desk_h - self._ry) * s
+        return mx <= px <= mx + self._rw * s and my_top <= py <= my_bot
 
     def _clamp(self):
         # Fit within desk while preserving aspect ratio
@@ -177,6 +184,15 @@ class WorkspaceCanvas(QWidget):
             self._rx = max(0.0, min(self._rx, self._desk_w - self._rw))
         if self._rh <= self._desk_h:
             self._ry = max(0.0, min(self._ry, self._desk_h - self._rh))
+
+    def update_cursor(self, y, z, active):
+        self._cursor_y, self._cursor_z, self._cursor_active = y, z, active
+        self.update()
+
+    def set_source(self, y, z):
+        self._source_y = y
+        self._source_z = z
+        self.update()
 
     def _emit(self):
         self.changed.emit(self._rx, self._rx + self._rw,
@@ -202,7 +218,7 @@ class WorkspaceCanvas(QWidget):
 
         # Monitor rect
         mx = ox + self._rx * s
-        my = oy + self._ry * s
+        my = oy + (self._desk_h - self._ry - self._rh) * s
         mw = int(self._rw * s)
         mh = int(self._rh * s)
         p.setBrush(QBrush(QColor(70, 130, 220, 90)))
@@ -228,26 +244,54 @@ class WorkspaceCanvas(QWidget):
         p.drawLine(int(mx + mw / 2), int(my), int(mx + mw / 2), int(my + mh))
         p.drawLine(int(mx), int(my + mh / 2), int(mx + mw), int(my + mh / 2))
 
-        # Player marker — top-center of desk
+        # Player marker — bottom-center of desk
         px_p, py_p = self._to_px(self._desk_w / 2, 0)
         tri_size = 8
         tri = QPolygon([
-            QPoint(int(px_p),            int(py_p) - 2),
-            QPoint(int(px_p) - tri_size, int(py_p) - 2 - tri_size * 2),
-            QPoint(int(px_p) + tri_size, int(py_p) - 2 - tri_size * 2),
+            QPoint(int(px_p),            int(py_p) + 2),
+            QPoint(int(px_p) - tri_size, int(py_p) + 2 + tri_size * 2),
+            QPoint(int(px_p) + tri_size, int(py_p) + 2 + tri_size * 2),
         ])
         p.setBrush(QBrush(QColor(220, 60, 60)))
         p.setPen(QPen(QColor(160, 30, 30), 1))
         p.drawPolygon(tri)
         p.setPen(QColor(160, 30, 30))
         p.setFont(QFont('Arial', 11, QFont.Bold))
-        p.drawText(int(px_p) - 22, int(py_p) - 2 - tri_size * 2 - 4, "Player")
+        p.drawText(int(px_p) - 22, int(py_p) + 2 + tri_size * 2 + 14, "Player")
 
         # Resize handle (bottom-right)
         x1, y1, x2, y2 = self._handle_px()
         p.setBrush(QBrush(QColor(30, 90, 200)))
         p.setPen(Qt.NoPen)
         p.drawRect(int(x1), int(y1), int(x2 - x1), int(y2 - y1))
+
+        self._draw_source(p)
+        self._draw_cursor(p)
+
+    def _draw_source(self, p):
+        if self._source_y is None:
+            return
+        sx, sy = self._to_px(self._source_y, self._source_z)
+        half = 10
+        p.setPen(QPen(QColor(255, 200, 0), 2))
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(int(sx) - half, int(sy) - half, half * 2, half * 2)
+        p.drawLine(int(sx) - half - 6, int(sy), int(sx) + half + 6, int(sy))
+        p.drawLine(int(sx), int(sy) - half - 6, int(sx), int(sy) + half + 6)
+        p.setPen(QColor(255, 200, 0))
+        p.setFont(QFont('Arial', 10, QFont.Bold))
+        p.drawText(int(sx) + half + 4, int(sy) + 4, "Source")
+
+    def _draw_cursor(self, p):
+        if not self._cursor_active:
+            return
+        sx, sy = self._to_px(self._cursor_y, self._cursor_z)
+        p.setPen(QPen(QColor(220, 30, 30), 1))
+        p.drawLine(int(sx) - 21, int(sy), int(sx) + 21, int(sy))
+        p.drawLine(int(sx), int(sy) - 21, int(sx), int(sy) + 21)
+        p.setBrush(QBrush(QColor(220, 30, 30, 160)))
+        p.setPen(QPen(QColor(255, 255, 255), 1))
+        p.drawEllipse(QPoint(int(sx), int(sy)), 9, 9)
 
     # ── mouse ────────────────────────────────────────────
 
@@ -268,8 +312,8 @@ class WorkspaceCanvas(QWidget):
         key  = e.key()
         if   key == Qt.Key_Left:  self._rx -= step
         elif key == Qt.Key_Right: self._rx += step
-        elif key == Qt.Key_Up:    self._ry -= step
-        elif key == Qt.Key_Down:  self._ry += step
+        elif key == Qt.Key_Up:    self._ry += step
+        elif key == Qt.Key_Down:  self._ry -= step
         else:
             super().keyPressEvent(e)
             return
@@ -327,10 +371,22 @@ class EnvironmentScreen(QWidget):
         self._origin_countdown = 0
         self._origin_timer = QTimer(self)
         self._origin_timer.timeout.connect(self._origin_tick)
+        self._cursor_timer = QTimer(self)
+        self._cursor_timer.timeout.connect(self._tick)
+        self._cursor_timer.start(50)
         self._build()
 
     def showEvent(self, e):
         super().showEvent(e)
+        self._load_task_env()
+
+    def _load_task_env(self):
+        task_key = self.state.task_type
+        for attr in ('env_rect_x', 'env_rect_y', 'env_rect_w', 'env_rect_h'):
+            setattr(self.state, attr, None)
+        self.state.load_task_rect(task_key, fallback=False)
+        task_name = task_key.replace('_', ' ').title()
+        self.title_lbl.setText(f"Environment — {task_name}")
         if self.state.env_rect_x is not None:
             self.canvas.restore_rect(
                 self.state.env_rect_x, self.state.env_rect_y,
@@ -349,10 +405,10 @@ class EnvironmentScreen(QWidget):
         back.clicked.connect(lambda: self.mw.show_screen('menu'))
         top.addWidget(back)
         top.addStretch()
-        title = QLabel("Environment")
-        title.setFont(QFont('Arial', 22, QFont.Bold))
-        title.setStyleSheet("color: #000000;")
-        top.addWidget(title)
+        self.title_lbl = QLabel("Environment")
+        self.title_lbl.setFont(QFont('Arial', 22, QFont.Bold))
+        self.title_lbl.setStyleSheet("color: #000000;")
+        top.addWidget(self.title_lbl)
         top.addStretch()
         root.addLayout(top)
 
@@ -510,11 +566,6 @@ class EnvironmentScreen(QWidget):
         root.addLayout(bot)
 
         self._on_update()
-        if self.state.env_rect_x is not None:
-            self.canvas.restore_rect(
-                self.state.env_rect_x, self.state.env_rect_y,
-                self.state.env_rect_w, self.state.env_rect_h,
-            )
 
     def _bold(self, text):
         lbl = QLabel(text)
@@ -607,11 +658,7 @@ class EnvironmentScreen(QWidget):
         self.desk_h.setValue(self.state.env_desk_h)
 
         self._on_update()
-        if self.state.env_rect_x is not None:
-            self.canvas.restore_rect(
-                self.state.env_rect_x, self.state.env_rect_y,
-                self.state.env_rect_w, self.state.env_rect_h,
-            )
+        self._load_task_env()
 
     def _update_desk_ratio(self):
         h = self.desk_h.value()
@@ -652,6 +699,25 @@ class EnvironmentScreen(QWidget):
         self.state.save_task_rect(self.state.task_type)
         task_name = self.state.task_type.replace('_', ' ').title() + ' Task'
         QMessageBox.information(self, "Saved", f"{task_name} environment settings saved.")
+
+    def _tick(self):
+        if (self.state.sensor_x_offset == 0.0 and
+                self.state.sensor_y_offset == 0.0 and
+                self.state.sensor_z_offset == 0.0):
+            self.canvas.update_cursor(0, 0, False)
+            self.canvas.set_source(None, None)
+            return
+        src_y = -self.state.sensor_y_offset
+        src_z = -self.state.sensor_z_offset
+        self.canvas.set_source(src_y, src_z)
+        s1 = self.liberty.get_sensor(1)
+        if s1 is None:
+            self.canvas.update_cursor(0, 0, False)
+            return
+        y = s1.y * 2.54 - self.state.sensor_y_offset
+        z = s1.z * 2.54 - self.state.sensor_z_offset
+        active = (0 <= y <= self.canvas._desk_w and 0 <= z <= self.canvas._desk_h)
+        self.canvas.update_cursor(y, z, active)
 
     def _origin_text(self):
         x = self.state.sensor_x_offset

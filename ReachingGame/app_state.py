@@ -43,6 +43,7 @@ class AppState:
         self.ws_guide_speed_R    = 15.0           # guide line sweep speed — right arm (°/s)
         self.ws_guide_speed_L    = 15.0           # guide line sweep speed — left arm (°/s)
         self.ws_elev_dur         = 1.0            # seconds below elevation threshold before abort
+        self.ws_shadow_circle_on = True           # show shadow + cursor circles on lateral line
 
         # Digitization — Mode 0: Cursor  (nothing below is persisted across restarts)
         self.dig_mode              = 0
@@ -119,6 +120,20 @@ class AppState:
 
     _TASK_RECT_KEYS = ('env_rect_x', 'env_rect_y', 'env_rect_w', 'env_rect_h')
 
+    def env_scale(self):
+        """Return monitor rect scale relative to physical monitor size (1.0 = 1×)."""
+        if self.env_rect_w is None:
+            return 1.0
+        import math
+        from screens.environment import ASPECT_RATIOS
+        diag = self.env_mon_size
+        if self.env_mon_unit == 'cm':
+            diag /= 2.54
+        rw, rh = ASPECT_RATIOS[min(self.env_mon_ratio_idx, len(ASPECT_RATIOS) - 1)][1:3]
+        d = math.sqrt(rw ** 2 + rh ** 2)
+        real_mon_w = diag * rw / d * 2.54
+        return round(self.env_rect_w / real_mon_w, 2) if real_mon_w > 0 else 1.0
+
     def save_config(self):
         data = {}
         if os.path.exists(_CONFIG_PATH):
@@ -148,8 +163,16 @@ class AppState:
         with open(_CONFIG_PATH, 'w') as f:
             json.dump(data, f, indent=2)
 
-    def load_task_rect(self, task_key):
-        """Load env_rect_* from tasks.{task_key}, falling back to top-level values."""
+    def load_task_rect(self, task_key, fallback=True):
+        """Load env_rect_* from tasks.{task_key}.
+
+        fallback=True  (default / app startup): if no task-specific rect exists,
+                       fall back to top-level env_rect_* for backward compat.
+        fallback=False (task switch at runtime): use only task-specific values;
+                       leave env_rect_* as-is (caller should reset to None first).
+        After loading, WORKSPACE_Y/Z_MIN/MAX are synced from env_rect so the
+        game coordinate system always matches the current task's environment.
+        """
         if not os.path.exists(_CONFIG_PATH):
             return
         try:
@@ -160,13 +183,21 @@ class AppState:
                 for k in self._TASK_RECT_KEYS:
                     if k in task_data:
                         setattr(self, k, task_data[k])
-            else:
-                # backward compat: use top-level env_rect_* if tasks section absent
+            elif fallback:
                 for k in self._TASK_RECT_KEYS:
                     if k in data:
                         setattr(self, k, data[k])
         except Exception:
             pass
+        self._sync_workspace_from_rect()
+
+    def _sync_workspace_from_rect(self):
+        """Sync WORKSPACE_Y/Z_MIN/MAX from env_rect_* if a rect is set."""
+        if self.env_rect_x is not None:
+            self.WORKSPACE_Y_MIN = self.env_rect_x
+            self.WORKSPACE_Y_MAX = self.env_rect_x + self.env_rect_w
+            self.WORKSPACE_Z_MIN = self.env_rect_y
+            self.WORKSPACE_Z_MAX = self.env_rect_y + self.env_rect_h
 
     def load_config(self):
         if not os.path.exists(_CONFIG_PATH):

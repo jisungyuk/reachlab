@@ -297,7 +297,14 @@ class MenuScreen(QWidget):
     def _on_task_changed(self, index):
         key = self.task_combo.itemData(index)
         self.state.task_type = key
-        self.state.load_task_rect(key)
+        # reset env_rect to None, then load only task-specific saved values (no cross-task fallback)
+        for attr in ('env_rect_x', 'env_rect_y', 'env_rect_w', 'env_rect_h'):
+            setattr(self.state, attr, None)
+        self.state.load_task_rect(key, fallback=False)
+        # turn off dummy mode so the new task starts clean
+        if self.toggle.isOn():
+            self.toggle.setOn(False)
+            self._on_toggle(False)
         self._update_status()
 
     def _browse_folder(self):
@@ -418,6 +425,7 @@ class MenuScreen(QWidget):
                 self.mw._setup_dummy_defaults()
         else:
             self.liberty.use_mouse = False
+            self.mouse_toggle.setOn(False)
             if hasattr(self.mw, '_clear_dummy_defaults'):
                 self.mw._clear_dummy_defaults()
         self.mouse_row_widget.setVisible(on)

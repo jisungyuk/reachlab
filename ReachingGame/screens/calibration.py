@@ -80,6 +80,8 @@ class CalibrationCanvas(QWidget):
         self._s1_y      = 0.0
         self._s1_z      = 0.0
         self._s1_active = False
+        self._source_y  = None
+        self._source_z  = None
 
     # ── public ───────────────────────────────────────────
 
@@ -146,6 +148,11 @@ class CalibrationCanvas(QWidget):
 
     def update_s1(self, y, z, active):
         self._s1_y, self._s1_z, self._s1_active = y, z, active
+        self.update()
+
+    def set_source(self, y_cm, z_cm):
+        self._source_y = y_cm
+        self._source_z = z_cm
         self.update()
 
     def get_stats(self):
@@ -230,6 +237,18 @@ class CalibrationCanvas(QWidget):
         p.setPen(dash)
         p.drawLine(int(ox + dw/2), int(oy), int(ox + dw/2), int(oy + dh))
         p.drawLine(int(ox), int(oy + dh/2), int(ox + dw), int(oy + dh/2))
+
+        if self._source_y is not None:
+            px_s, py_s = self._px(self._source_y, self._source_z)
+            half = 10
+            p.setPen(QPen(QColor(255, 200, 0), 2))
+            p.setBrush(Qt.NoBrush)
+            p.drawRect(px_s - half, py_s - half, half * 2, half * 2)
+            p.drawLine(px_s - half - 6, py_s, px_s + half + 6, py_s)
+            p.drawLine(px_s, py_s - half - 6, px_s, py_s + half + 6)
+            p.setPen(QColor(255, 200, 0))
+            p.setFont(QFont('Arial', 10, QFont.Bold))
+            p.drawText(px_s + half + 4, py_s + 4, "Source")
 
         if self._mat_origin_y is None:
             # S1 cursor only
@@ -382,6 +401,11 @@ class CalibrationScreen(QWidget):
         self.mat_w.valueChanged.connect(self._update_grid_lbl)
         self.mat_h.valueChanged.connect(self._update_grid_lbl)
 
+        srow.addSpacing(16)
+        self.start_btn = QPushButton("▶  Start")
+        self.start_btn.setStyleSheet(BTN)
+        self.start_btn.clicked.connect(self._on_start_btn)
+        srow.addWidget(self.start_btn)
         srow.addStretch()
         root.addLayout(srow)
 
@@ -403,12 +427,6 @@ class CalibrationScreen(QWidget):
         self.stat_lbl.setStyleSheet("color: #333333;")
         bot.addWidget(self.stat_lbl)
         bot.addStretch()
-
-        self.start_btn = QPushButton("Reset")
-        self.start_btn.setStyleSheet(BTN)
-        self.start_btn.clicked.connect(self._on_start)
-        bot.addWidget(self.start_btn)
-        bot.addSpacing(8)
 
         self.save_btn = QPushButton("Save")
         self.save_btn.setStyleSheet(BTN)
@@ -558,19 +576,30 @@ class CalibrationScreen(QWidget):
             c._current_idx = len(c._grid_points)
             c.update()
             self._set_phase('done')
+            ts = data.get('timestamp', '')
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(ts, '%Y%m%d_%H%M%S')
+                date_str = dt.strftime('%Y-%m-%d  %H:%M:%S')
+            except Exception:
+                date_str = ts
+            self.instr_lbl.setText(f"Loaded previous calibration — {date_str}")
             return True
         except Exception:
             return False
 
-    def _on_start(self):
-        if not self._load_latest():
-            self._refresh_desk()
-            w_cm, h_cm = self._mat_dims_cm()
-            self.canvas.set_mat(w_cm, h_cm)
-            self.canvas.set_margin(self._margin_cm())
-            self.canvas.set_grid(*self._calc_grid())
-            self.canvas.reset()
-            self._set_phase('set_origin')
+    def _on_start_btn(self):
+        self._refresh_desk()
+        w_cm, h_cm = self._mat_dims_cm()
+        self.canvas.set_mat(w_cm, h_cm)
+        self.canvas.set_margin(self._margin_cm())
+        self.canvas.set_grid(*self._calc_grid())
+        self.canvas.reset()
+        self._set_phase('set_origin')
+
+    def _update_source(self):
+        self.canvas.set_source(-self.state.sensor_y_offset,
+                               -self.state.sensor_z_offset)
 
     def _on_save(self):
         os.makedirs(SAVE_DIR, exist_ok=True)
@@ -646,4 +675,6 @@ class CalibrationScreen(QWidget):
 
     def showEvent(self, e):
         self.setFocus()
-        self._on_start()
+        self._update_source()
+        if not self._load_latest():
+            self._on_start_btn()
