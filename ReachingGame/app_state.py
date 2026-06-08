@@ -15,7 +15,7 @@ class AppState:
         self.participant_id = ""
         self.session_name = "session_001"
         self.data_dir = ""
-        self.sample_rate_hz = 250
+        self.sample_rate_hz = 200
         self.targets = []
         self.target_radius_inch = 1.5
 

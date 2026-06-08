@@ -205,7 +205,7 @@ class MenuScreen(QWidget):
         rate_row.addWidget(rate_lbl)
         rate_row.addSpacing(6)
         self.rate_spin = QSpinBox()
-        self.rate_spin.setRange(10, 500)
+        self.rate_spin.setRange(10, 240)
         self.rate_spin.setValue(self.state.sample_rate_hz)
         self.rate_spin.setSuffix(" Hz")
         self.rate_spin.setFixedWidth(80)
@@ -465,10 +465,13 @@ class MenuScreen(QWidget):
         self._set_locked(game_running)
         self.game_status_lbl.setVisible(game_running)
 
-        if self.liberty.is_running():
+        status = self.liberty.get_status()
+        if status == 'running':
             color, text = '#32dc50', '●  Liberty: RUNNING'
-        elif self.liberty.is_connected():
+        elif status == 'connected':
             color, text = '#e08000', '●  Liberty: CONNECTED'
+        elif status == 'launching':
+            color, text = '#6688cc', '●  Liberty: LAUNCHING...'
         else:
             color, text = '#dc3232', '●  Liberty: DISCONNECTED'
         if self.liberty.use_mouse:

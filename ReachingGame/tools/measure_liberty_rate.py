@@ -1,61 +1,111 @@
 """
-Measures the actual Liberty sensor update rate.
-Run this script while Liberty is connected and streaming.
-Records packet arrival timestamps for each station over DURATION seconds,
+Measures the actual Liberty sensor update rate via UDP (UnityExport).
+Launches UnityExport.exe automatically, measures for DURATION seconds,
 then prints mean Hz, std dev, min/max interval per station.
 """
 
+import socket
 import struct
 import time
 import statistics
+import subprocess
+import os
+import atexit
 
-PIPE_NAME = r'\\.\pipe\PDIPnOPipe'
-DURATION  = 30.0   # seconds to measure
-HEADER    = b'LY'
+UDP_PORT = 5123
+DURATION = 30.0
+HEADER   = b'LY'
+
+_EXE = r'C:\Polhemus\PDI\PDI_140\Samples\bin\x64\Release\UnityExport.exe'
+_DLL_DIRS = [
+    r'C:\Polhemus\PDI\PDI_140\Lib\x64',
+    r'C:\Polhemus\PiMgr',
+]
+
+_proc = None
+
+
+def _launch():
+    global _proc
+    if not os.path.exists(_EXE):
+        print(f"ERROR: UnityExport.exe not found at {_EXE}")
+        return False
+    env = os.environ.copy()
+    env['PATH'] = ';'.join(_DLL_DIRS) + ';' + env.get('PATH', '')
+    si = subprocess.STARTUPINFO()
+    si.dwFlags = subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = 0  # SW_HIDE
+    _proc = subprocess.Popen(
+        [_EXE],
+        startupinfo=si,
+        creationflags=subprocess.CREATE_NEW_CONSOLE,
+        env=env,
+    )
+    atexit.register(_cleanup)
+    print(f"Launched UnityExport.exe (pid {_proc.pid})")
+    return True
+
+
+def _cleanup():
+    global _proc
+    if _proc and _proc.poll() is None:
+        _proc.kill()
+        print("UnityExport.exe stopped.")
 
 
 def measure():
-    print(f"Connecting to Liberty pipe: {PIPE_NAME}")
+    if not _launch():
+        return
+
+    print("Waiting 3s for Liberty to connect...")
+    time.sleep(3.0)
+
+    if _proc.poll() is not None:
+        print(f"ERROR: UnityExport.exe exited early (code {_proc.returncode})")
+        return
+
+    print(f"Listening on UDP port {UDP_PORT}")
     print(f"Measuring for {DURATION} seconds — keep sensors active...\n")
 
     timestamps = {i: [] for i in range(1, 5)}
-    start = None
 
     try:
-        with open(PIPE_NAME, 'rb') as pipe:
-            print("Connected. Recording...")
-            buffer = b''
-            start  = time.perf_counter()
-
-            while time.perf_counter() - start < DURATION:
-                chunk = pipe.read(512)
-                if not chunk:
-                    continue
-                buffer += chunk
-                now = time.perf_counter()
-
-                i = 0
-                while i < len(buffer) - 32:
-                    idx = buffer.find(HEADER, i)
-                    if idx == -1:
-                        break
-                    if idx + 32 <= len(buffer):
-                        try:
-                            station = buffer[idx + 2]
-                            if 1 <= station <= 4:
-                                timestamps[station].append(now)
-                        except Exception:
-                            pass
-                    i = idx + 1
-
-                buffer = buffer[-128:]
-
-    except FileNotFoundError:
-        print("ERROR: Liberty pipe not found. Is the Liberty software running?")
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(('', UDP_PORT))
+        sock.settimeout(2.0)
+    except Exception as e:
+        print(f"ERROR binding socket: {e}")
         return
-    except Exception as ex:
-        print(f"ERROR: {ex}")
-        return
+
+    start = time.perf_counter()
+    try:
+        while time.perf_counter() - start < DURATION:
+            try:
+                data, _ = sock.recvfrom(4096)
+            except socket.timeout:
+                continue
+
+            now = time.perf_counter()
+            i = 0
+            while i < len(data) - 40:
+                idx = data.find(HEADER, i)
+                if idx == -1:
+                    break
+                if idx + 40 > len(data):
+                    break
+                try:
+                    station = data[idx + 2]
+                    if 1 <= station <= 4:
+                        timestamps[station].append(now)
+                except Exception:
+                    pass
+                i = idx + 1
+
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sock.close()
 
     elapsed = time.perf_counter() - start
     print(f"\nMeasured for {elapsed:.1f}s\n")
