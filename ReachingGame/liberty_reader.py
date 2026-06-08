@@ -48,10 +48,21 @@ class LibertyReader:
         self._packet_times = deque()
         self._lock = threading.Lock()
         self._proc = None
+        self._last_launch_time = 0.0
         if not dummy:
             self._launch_unity_export()
             atexit.register(self._cleanup)
         threading.Thread(target=self._read_loop, daemon=True).start()
+
+    @staticmethod
+    def _kill_all_unity_export():
+        try:
+            subprocess.call(
+                ['taskkill', '/F', '/IM', 'UnityExport.exe'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
 
     def _launch_unity_export(self):
         if not os.path.exists(_EXE):
@@ -68,6 +79,7 @@ class LibertyReader:
                 creationflags=subprocess.CREATE_NEW_CONSOLE,
                 env=env,
             )
+            self._last_launch_time = time.perf_counter()
         except Exception:
             self._proc = None
 
@@ -75,18 +87,33 @@ class LibertyReader:
         if self._proc and self._proc.poll() is None:
             self._proc.kill()
 
+    def _restart_unity_export(self):
+        if time.perf_counter() - self._last_launch_time < 8.0:
+            return
+        if self._proc and self._proc.poll() is None:
+            self._proc.kill()
+            try:
+                self._proc.wait(timeout=2.0)
+            except Exception:
+                pass
+        self._kill_all_unity_export()
+        time.sleep(5.0)
+        self._launch_unity_export()
+
     def get_status(self):
-        """Return 'disconnected' | 'launching' | 'connected' | 'running'."""
-        if self.dummy:
-            return 'disconnected'
+        """Return 'disconnected' | 'connected' | 'running'."""
         proc_alive = self._proc is not None and self._proc.poll() is None
         if not proc_alive:
             return 'disconnected'
-        if not self._connected:
-            return 'launching'
-        if time.perf_counter() - self._last_data_time < 1.5:
+        since_data = (time.perf_counter() - self._last_data_time
+                      if self._last_data_time > 0 else float('inf'))
+        if since_data < 1.5:
             return 'running'
-        return 'connected'
+        # CONNECTED: just launched/restarted, waiting for Liberty to stream
+        if (self._last_launch_time > self._last_data_time and
+                time.perf_counter() - self._last_launch_time < 8.0):
+            return 'connected'
+        return 'disconnected'
 
     def is_connected(self):
         return self._connected
@@ -134,6 +161,8 @@ class LibertyReader:
                         data, _ = sock.recvfrom(4096)
                         self._parse(data)
                     except socket.timeout:
+                        if self._proc and self._proc.poll() is not None:
+                            self._restart_unity_export()
                         continue
             except Exception:
                 self._connected = False

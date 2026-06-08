@@ -357,6 +357,10 @@ class MenuScreen(QWidget):
             QApplication.quit()
 
         elif key == 'start':
+            if not self.liberty.use_mouse and self.liberty.get_status() != 'running':
+                QMessageBox.warning(self, "Liberty Not Running",
+                                    "Liberty must be running before starting the game.")
+                return
             if not self.state.data_dir:
                 QMessageBox.warning(self, "No Folder Selected",
                                     "Please select a data folder before starting.")
@@ -465,17 +469,16 @@ class MenuScreen(QWidget):
         self._set_locked(game_running)
         self.game_status_lbl.setVisible(game_running)
 
-        status = self.liberty.get_status()
-        if status == 'running':
-            color, text = '#32dc50', '●  Liberty: RUNNING'
-        elif status == 'connected':
-            color, text = '#e08000', '●  Liberty: CONNECTED'
-        elif status == 'launching':
-            color, text = '#6688cc', '●  Liberty: LAUNCHING...'
-        else:
-            color, text = '#dc3232', '●  Liberty: DISCONNECTED'
         if self.liberty.use_mouse:
-            text += '  |  Mouse'
+            color, text = '#888888', '●  Mouse Mode'
+        else:
+            status = self.liberty.get_status()
+            if status == 'running':
+                color, text = '#32dc50', '●  Liberty: RUNNING'
+            elif status == 'connected':
+                color, text = '#e08000', '●  Liberty: CONNECTED'
+            else:
+                color, text = '#dc3232', '●  Liberty: DISCONNECTED'
         self.status_lbl.setText(text)
         self.status_lbl.setStyleSheet(f"color: {color};")
         for n, lbl in self.sensor_lbls.items():
