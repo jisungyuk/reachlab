@@ -1,19 +1,19 @@
 import math
 import time
 import threading
-import winsound
+from screens._beep import beep
 from PyQt5.QtWidgets import QWidget
 from PyQt5.QtCore import Qt, QTimer, QRect, QPoint
 from PyQt5.QtGui import QPainter, QColor, QBrush, QFont, QPen
 
 
 def _beep(freq, ms):
-    threading.Thread(target=winsound.Beep, args=(freq, ms), daemon=True).start()
+    threading.Thread(target=beep, args=(freq, ms), daemon=True).start()
 
 def _beep_seq(*pairs):
     def _run():
         for freq, ms in pairs:
-            winsound.Beep(freq, ms)
+            beep(freq, ms)
     threading.Thread(target=_run, daemon=True).start()
 
 
@@ -72,6 +72,10 @@ class GameScreen(QWidget):
         self._paused   = False
         self._cursor_y = self.state.WORKSPACE_Y_MAX / 2
         self._cursor_z = self.state.WORKSPACE_Z_MAX / 2
+
+    def hideEvent(self, e):
+        self._timer.stop()
+        self._paused = False
 
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:

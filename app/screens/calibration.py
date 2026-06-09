@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QPoint, QTimer
 from PyQt5.QtGui import QPainter, QColor, QBrush, QPen, QFont, QPolygon
 
-SAVE_DIR   = r'C:\Users\Jisung Yuk\Desktop\Liberty\calibrated matrix'
+SAVE_DIR   = os.path.join(os.path.expanduser('~'), 'Desktop', 'Liberty', 'calibrated matrix')
 LATEST_CAL = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           '..', 'last_calibration.json')
 

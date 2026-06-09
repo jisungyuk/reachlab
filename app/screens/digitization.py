@@ -1,7 +1,7 @@
 import json
 import os
 import threading
-import winsound
+from screens._beep import beep
 from collections import Counter
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
                              QLabel, QComboBox, QPushButton, QFrame, QScrollArea,
@@ -79,9 +79,8 @@ _VIEW_RATIO = 0.30  # display at 30% of real size
 
 def _beep_complete():
     """Ascending C-major arpeggio — played in a background thread."""
-    import winsound
     for freq, dur in [(523, 80), (659, 80), (784, 80), (1047, 280)]:
-        winsound.Beep(freq, dur)
+        beep(freq, dur)
 
 C_RIGHT = QColor(210, 50,  50)
 C_LEFT  = QColor(50,  80, 210)
@@ -1076,7 +1075,7 @@ class DigitizationScreen(QWidget):
             self.state.mcp_offset_left = offset
         self.state.save_config()
         self._autosave_dig()
-        threading.Thread(target=winsound.Beep, args=(880, 120), daemon=True).start()
+        threading.Thread(target=beep, args=(880, 120), daemon=True).start()
         status_lbl.setText(self._offset_text(offset))
 
     def _shortcut_record(self, side):
@@ -1483,7 +1482,7 @@ class DigitizationScreen(QWidget):
             setattr(self.state, f'wrist_L_{lm}', offset)
         self.state.save_config()
         self._autosave_wrist()
-        threading.Thread(target=winsound.Beep, args=(880, 120), daemon=True).start()
+        threading.Thread(target=beep, args=(880, 120), daemon=True).start()
         status_lbl.setText(self._wrist_lm_text('left', lm, offset))
 
     def _record_wrist_R(self, lm, status_lbl):
@@ -1504,7 +1503,7 @@ class DigitizationScreen(QWidget):
             # RSP / USP / ME / LE — temp in R.Hand frame until Finalize
             self._wrist_R_tmp[lm] = offset
         self._autosave_wrist()
-        threading.Thread(target=winsound.Beep, args=(880, 120), daemon=True).start()
+        threading.Thread(target=beep, args=(880, 120), daemon=True).start()
         status_lbl.setText(self._wrist_lm_text(
             'right', lm, getattr(self.state, f'wrist_R_{lm}'), self._wrist_R_tmp.get(lm)))
 
@@ -1876,7 +1875,7 @@ class DigitizationScreen(QWidget):
         setattr(self.state, f'arm_L_{lm}', offset)
         self.state.save_config()
         self._autosave_arm()
-        threading.Thread(target=winsound.Beep, args=(880, 120), daemon=True).start()
+        threading.Thread(target=beep, args=(880, 120), daemon=True).start()
         status_lbl.setText(self._arm_lm_text('left', lm, offset))
 
     def _record_arm_R(self, lm, status_lbl):
@@ -1895,7 +1894,7 @@ class DigitizationScreen(QWidget):
         else:
             self._arm_R_tmp[lm] = offset
         self._autosave_arm()
-        threading.Thread(target=winsound.Beep, args=(880, 120), daemon=True).start()
+        threading.Thread(target=beep, args=(880, 120), daemon=True).start()
         status_lbl.setText(self._arm_lm_text(
             'right', lm, getattr(self.state, f'arm_R_{lm}'), self._arm_R_tmp.get(lm)))
 
@@ -2226,7 +2225,7 @@ class DigitizationScreen(QWidget):
             self.state.save_config()
 
         self._autosave_arm4()
-        threading.Thread(target=winsound.Beep, args=(880, 120), daemon=True).start()
+        threading.Thread(target=beep, args=(880, 120), daemon=True).start()
         status_lbl.setText(self._arm4_lm_text(
             lm, getattr(self.state, f'arm4_{lm}'), self._arm4_tmp.get(lm)))
 

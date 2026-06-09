@@ -1,7 +1,7 @@
 import math
 import time
 import threading
-import winsound
+from screens._beep import beep
 from PyQt5.QtWidgets import QWidget
 from PyQt5.QtCore import Qt, QTimer, QRect, QPoint
 from PyQt5.QtGui import QPainter, QColor, QBrush, QFont, QPen, QPolygon
@@ -24,12 +24,12 @@ def _shoelace(pts):
 
 
 def _beep(freq, ms):
-    threading.Thread(target=winsound.Beep, args=(freq, ms), daemon=True).start()
+    threading.Thread(target=beep, args=(freq, ms), daemon=True).start()
 
 def _beep_seq(*pairs):
     def _run():
         for freq, ms in pairs:
-            winsound.Beep(freq, ms)
+            beep(freq, ms)
     threading.Thread(target=_run, daemon=True).start()
 
 
@@ -79,6 +79,9 @@ class GameScreen(QWidget):
         self._timer.start(4)
 
     # ──────────────────────────────────────────────────── events
+
+    def hideEvent(self, e):
+        self._timer.stop()
 
     def showEvent(self, e):
         timer_ms = max(1, round(1000 / self.state.sample_rate_hz))

@@ -16,10 +16,15 @@ UDP_PORT = 5123
 DURATION = 30.0
 HEADER   = b'LY'
 
-_EXE = r'C:\Polhemus\PDI\PDI_140\Samples\bin\x64\Release\UnityExport.exe'
+_EXE = os.environ.get(
+    'POLHEMUS_EXE',
+    r'C:\Polhemus\PDI\PDI_140\Samples\bin\x64\Release\UnityExport.exe',
+)
 _DLL_DIRS = [
-    r'C:\Polhemus\PDI\PDI_140\Lib\x64',
-    r'C:\Polhemus\PiMgr',
+    p for p in os.environ.get(
+        'POLHEMUS_DLL_DIRS',
+        r'C:\Polhemus\PDI\PDI_140\Lib\x64;C:\Polhemus\PiMgr',
+    ).split(';') if p
 ]
 
 _proc = None
@@ -31,7 +36,7 @@ def _launch():
         print(f"ERROR: UnityExport.exe not found at {_EXE}")
         return False
     env = os.environ.copy()
-    env['PATH'] = ';'.join(_DLL_DIRS) + ';' + env.get('PATH', '')
+    env['PATH'] = os.pathsep.join(_DLL_DIRS) + os.pathsep + env.get('PATH', '')
     si = subprocess.STARTUPINFO()
     si.dwFlags = subprocess.STARTF_USESHOWWINDOW
     si.wShowWindow = 0  # SW_HIDE

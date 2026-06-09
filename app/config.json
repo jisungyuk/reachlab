@@ -1,0 +1,23 @@
+{
+  "WORKSPACE_Y_MIN": 20.85495339259112,
+  "WORKSPACE_Y_MAX": 131.5450466074089,
+  "WORKSPACE_Z_MIN": 26.63682256666501,
+  "WORKSPACE_Z_MAX": 88.9,
+  "env_mon_size": 50.0,
+  "env_mon_unit": "in",
+  "env_mon_ratio_idx": 0,
+  "env_desk_w": 60.0,
+  "env_desk_h": 35.0,
+  "env_desk_unit": "in",
+  "sensor_x_offset": 3.2283399999999998,
+  "sensor_y_offset": -75.58532,
+  "sensor_z_offset": -40.637460000000004,
+  "tasks": {
+    "reaching": {
+      "env_rect_x": 20.85495339259112,
+      "env_rect_y": 26.63682256666501,
+      "env_rect_w": 110.69009321481776,
+      "env_rect_h": 62.263177433334995
+    }
+  }
+}

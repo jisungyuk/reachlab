@@ -1,5 +1,9 @@
 import sys
 import os
+
+if sys.platform != 'win32':
+    os.environ.setdefault('QT_QPA_PLATFORM', 'wayland')
+
 from PyQt5.QtWidgets import QApplication, QMainWindow, QStackedWidget, QTableWidgetItem
 
 from app_state import AppState
@@ -14,7 +18,7 @@ import tasks.workspace_task as workspace_task
 
 TASKS = [reaching_task, workspace_task]
 
-DUMMY_DATA_DIR = r'C:\Users\Jisung Yuk\Desktop\Liberty\test'
+DUMMY_DATA_DIR = os.path.join(os.path.expanduser('~'), 'Desktop', 'Liberty', 'test')
 
 
 class GameWindow(QMainWindow):
@@ -128,9 +132,65 @@ class MainWindow(QMainWindow):
             self.screens[name].setFocus()
 
 
+_UDEV_RULE_PATH = '/etc/udev/rules.d/99-polhemus.rules'
+_UDEV_RULE      = ('SUBSYSTEM=="usb", ATTRS{idVendor}=="0f44", '
+                   'ATTRS{idProduct}=="ff12", MODE="0666"')
+
+
+def _ensure_usb_permissions():
+    import subprocess
+    from PyQt5.QtWidgets import QMessageBox
+
+    if os.path.exists(_UDEV_RULE_PATH):
+        return
+
+    reply = QMessageBox.question(
+        None,
+        "USB Permission Setup",
+        "The Polhemus Liberty USB device needs a one-time permission setup.\n\n"
+        "Click Yes to install automatically (requires admin password).",
+        QMessageBox.Yes | QMessageBox.No,
+    )
+
+    if reply == QMessageBox.Yes:
+        script = (f"echo '{_UDEV_RULE}' > {_UDEV_RULE_PATH} && "
+                  "udevadm control --reload-rules && udevadm trigger")
+        try:
+            result = subprocess.run(['pkexec', 'bash', '-c', script], timeout=30)
+            installed = result.returncode == 0
+        except Exception:
+            installed = False
+
+        if installed:
+            QMessageBox.information(
+                None, "Done",
+                "Permission installed.\n\n"
+                "Please unplug and replug the Liberty device, then click OK.",
+            )
+        else:
+            _show_usb_instructions()
+    else:
+        _show_usb_instructions()
+
+
+def _show_usb_instructions():
+    from PyQt5.QtWidgets import QMessageBox
+    QMessageBox.information(
+        None, "Manual Setup Required",
+        "Run these commands once in a terminal, then replug the Liberty device:\n\n"
+        f"echo '{_UDEV_RULE}' | sudo tee {_UDEV_RULE_PATH}\n"
+        "sudo udevadm control --reload-rules\n"
+        "sudo udevadm trigger",
+    )
+
+
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
+
+    if sys.platform == 'linux':
+        _ensure_usb_permissions()
+
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())

@@ -1,6 +1,6 @@
 import math
 import threading
-import winsound
+from screens._beep import beep
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QDoubleSpinBox, QComboBox, QPushButton,
                              QSizePolicy, QFrame, QMessageBox)
@@ -752,6 +752,6 @@ class EnvironmentScreen(QWidget):
         self.state.save_config()
         def _arpeggio():
             for freq, dur in [(523, 80), (659, 80), (784, 80), (1047, 280)]:
-                winsound.Beep(freq, dur)
+                beep(freq, dur)
         threading.Thread(target=_arpeggio, daemon=True).start()
         self.origin_lbl.setText(self._origin_text())

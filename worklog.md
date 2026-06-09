@@ -321,3 +321,41 @@
 
 - 각 섹션 제목을 별도 줄(13pt Bold)로 분리
 - 컨트롤은 그 아래 줄에 12px indent
+
+---
+
+## 2026-06-09
+
+### Cross-Platform Support (Windows → Linux)
+
+**Qt platform plugin**
+- Added `os.environ.setdefault('QT_QPA_PLATFORM', 'wayland')` at top of `main.py` for Linux
+- Added `.vscode/launch.json` so VSCode play button works without needing `run.sh`
+
+**Hardcoded Windows paths removed**
+- `liberty_reader.py`: `_EXE` and `_DLL_DIRS` now configurable via `POLHEMUS_EXE` / `POLHEMUS_DLL_DIRS` env vars; Windows defaults preserved
+- `tools/measure_liberty_rate.py`: same env var treatment
+- `screens/calibration.py`: `SAVE_DIR` changed from hardcoded `C:\Users\...` to `os.path.join(os.path.expanduser('~'), 'Desktop', 'Liberty', 'calibrated matrix')`
+
+**PATH separator fix**
+- `liberty_reader.py` and `measure_liberty_rate.py`: replaced hardcoded `;` with `os.pathsep`
+
+**`import os` moved to top level in `liberty_reader.py`**
+- Was inside `if sys.platform == 'win32'` block; caused `NameError` on Linux after env var refactor
+
+### Linux USB Permission Auto-Setup
+- On first launch on Linux, app checks for `/etc/udev/rules.d/99-polhemus.rules`
+- If missing, shows dialog offering automatic install via `pkexec` (GUI admin prompt)
+- Falls back to showing manual terminal commands if `pkexec` fails or user declines
+- Subsequent launches skip the check entirely
+
+### Linux Sensor Axis Inversion Fix
+- `_parse_linux_frame` was negating all three axes to "match Windows path"
+- Windows PDI SDK (UnityExport.exe) already applies its own coordinate transform before sending UDP, so the raw Liberty ASCII data does not need negation
+- Removed negation: `x, y, z = float(parts[0]), float(parts[1]), float(parts[2])`
+- This also fixed the environment screen cursor not appearing (negated coords were out of desk bounds)
+
+### Game Timer Leak Fix
+- Both `tasks/reaching/game.py` and `tasks/workspace/game.py` had no `hideEvent`
+- QTimer kept firing after returning to menu → continued beeping based on sensor position
+- Added `hideEvent` to both game screens: stops timer on hide, `showEvent` restarts it
