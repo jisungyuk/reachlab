@@ -1,0 +1,11 @@
+# Core app
+PyQt5>=5.15
+
+# Linux only: direct USB communication with Liberty
+pyusb>=1.3; sys_platform == "linux"
+
+# Optional: calibration and analysis scripts (scripts/CalibrationRelated/)
+# pip install numpy pandas matplotlib numpy-stl
+
+# Optional: serial port testing (scripts/test_connection.py)
+# pip install pyserial
