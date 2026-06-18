@@ -1,7 +1,13 @@
 import os
+import sys
 import json
 
-_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+if getattr(sys, 'frozen', False):
+    _BASE_DIR = os.path.dirname(sys.executable)
+else:
+    _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+_CONFIG_PATH = os.path.join(_BASE_DIR, 'config.json')
 
 
 class AppState:
@@ -10,7 +16,7 @@ class AppState:
         self.WORKSPACE_Y_MAX = 86.36
         self.WORKSPACE_Z_MIN = 0.0
         self.WORKSPACE_Z_MAX = 55.88
-        self.task_type = 'reaching'
+        self.task_type = 'workspace2'
         self.calibration_file = None
         self.participant_id = ""
         self.session_name = "session_001"
@@ -36,6 +42,11 @@ class AppState:
         self.sensor_y_offset   = 0.0
         self.sensor_z_offset   = 0.0
 
+        # Workspace Task 2 game settings
+        self.ws2_sweep_speed      = 1.5            # degrees per second (90° sweep default = 60 s)
+        self.ws2_show_split_stats = True          # show contra/ipsi breakdown in results
+        self.ws2_dot_offset       = 10.0          # cm beyond max reach where red dot appears
+
         # Workspace game settings
         self.start_trial         = 1               # 1-based trial to start from
         self.ws_ghost_mode       = 'individual'   # 'individual' | 'average' | 'max'
@@ -50,6 +61,8 @@ class AppState:
         self.dig_hand_setup        = 2   # 0=Right, 1=Left, 2=Both
         self.dig_sensor_right      = 1
         self.dig_sensor_left       = 2
+        self.dig_sensor_trunk      = 3
+        self.dig_trunk_enabled     = True   # default on for workspace2 (the default task)
 
         # Digitization — Mode 1: MCP
         self.mcp_sensor_pointer    = 3
@@ -114,6 +127,9 @@ class AppState:
         'env_mon_size', 'env_mon_unit', 'env_mon_ratio_idx',
         'env_desk_w', 'env_desk_h', 'env_desk_unit',
         'sensor_x_offset', 'sensor_y_offset', 'sensor_z_offset',
+        'ws2_sweep_speed',
+        'ws2_show_split_stats',
+        'ws2_dot_offset',
         # env_rect_* are per-task and saved/loaded via save/load_task_rect.
         # Digitization fields are intentionally NOT persisted.
     )

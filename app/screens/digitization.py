@@ -5,7 +5,7 @@ from screens._beep import beep
 from collections import Counter
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
                              QLabel, QComboBox, QPushButton, QFrame, QScrollArea,
-                             QFileDialog, QMessageBox)
+                             QFileDialog, QMessageBox, QCheckBox)
 from PyQt5.QtCore import Qt, QTimer, QPointF
 from PyQt5.QtGui import QFont, QKeySequence, QPainter, QPen, QColor
 from PyQt5.QtWidgets import QShortcut
@@ -84,6 +84,7 @@ def _beep_complete():
 
 C_RIGHT = QColor(210, 50,  50)
 C_LEFT  = QColor(50,  80, 210)
+C_TRUNK = QColor(50,  160, 80)
 
 
 class _DigCanvas(QWidget):
@@ -190,6 +191,8 @@ class _DigCanvas(QWidget):
                 ('right', st.dig_sensor_right, st.mcp_offset_right, C_RIGHT),
                 ('left',  st.dig_sensor_left,  st.mcp_offset_left,  C_LEFT),
             ]
+            if st.dig_trunk_enabled:
+                sides.append(('trunk', st.dig_sensor_trunk, None, C_TRUNK))
         for _, s_n, offset, color in sides:
             s = self.liberty.get_sensor(s_n)
             if s is None:
@@ -675,7 +678,15 @@ class DigitizationScreen(QWidget):
             self.mode_cb.setCurrentIndex(0)
             self._update_current_lbl()
             self._rebuild_content()
-        # else: returning within same session — keep existing content as-is
+        else:
+            # Sync trunk checkbox to current task state without rebuilding
+            if self._active_mode == 0 and hasattr(self, '_trunk_chk'):
+                self._trunk_chk.blockSignals(True)
+                self._trunk_chk.setChecked(self.state.dig_trunk_enabled)
+                self._trunk_chk.blockSignals(False)
+                self._trunk_cb.setEnabled(self.state.dig_trunk_enabled)
+                self._apply_trunk_style(self.state.dig_trunk_enabled)
+                self._refresh_cursor_assigned()
         super().showEvent(e)
 
     def hideEvent(self, e):
@@ -916,19 +927,36 @@ class DigitizationScreen(QWidget):
         lay.addWidget(self._bold("Sensor Assignment"))
         row = QHBoxLayout()
         cbs = []
-        for label, key in [("Right Hand:", 'right'), ("Left Hand:", 'left')]:
+        for label, key, default in [
+            ("Right Hand:", 'right', self.state.dig_sensor_right),
+            ("Left Hand:",  'left',  self.state.dig_sensor_left),
+        ]:
             l = QLabel(label)
             l.setFont(QFont('Arial', 14))
             l.setStyleSheet("color: #333333;")
             row.addWidget(l)
-            default = (self.state.dig_sensor_right if key == 'right'
-                       else self.state.dig_sensor_left)
             cb = self._sensor_cb(default)
             cb.currentIndexChanged.connect(
                 lambda _, k=key, c=cb: self._save_cursor_assign(k, c))
             row.addWidget(cb)
             row.addSpacing(20)
             cbs.append(cb)
+
+        # Trunk — optional, toggled by checkbox
+        self._trunk_chk = QCheckBox("Trunk:")
+        self._trunk_chk.setFont(QFont('Arial', 14))
+        self._trunk_chk.setChecked(self.state.dig_trunk_enabled)
+        self._apply_trunk_style(self.state.dig_trunk_enabled)
+        row.addWidget(self._trunk_chk)
+        self._trunk_cb = self._sensor_cb(self.state.dig_sensor_trunk)
+        self._trunk_cb.setEnabled(self.state.dig_trunk_enabled)
+        self._trunk_cb.currentIndexChanged.connect(
+            lambda _: self._save_cursor_assign('trunk', self._trunk_cb))
+        row.addWidget(self._trunk_cb)
+        row.addSpacing(20)
+
+        self._trunk_chk.toggled.connect(self._on_trunk_toggled)
+
         row.addStretch()
         lay.addLayout(row)
 
@@ -936,17 +964,42 @@ class DigitizationScreen(QWidget):
         for cb in cbs:
             cb.currentIndexChanged.connect(lambda _: self._apply_exclusions())
         self._apply_exclusions()
-        self._assigned_sensors = {self.state.dig_sensor_right, self.state.dig_sensor_left}
+        self._refresh_cursor_assigned()
 
         lay.addWidget(self._sep())
         self._canvas = _DigCanvas(self.state, self.liberty)
         self._add_canvas_section(lay)
 
+    def _apply_trunk_style(self, checked):
+        text_color = "#333333" if checked else "#aaaaaa"
+        self._trunk_chk.setStyleSheet(
+            f"QCheckBox {{ color: {text_color}; spacing: 6px; }}"
+            "QCheckBox::indicator { width: 16px; height: 16px;"
+            " border: 2px solid #888888; border-radius: 3px; background: #ffffff; }"
+            "QCheckBox::indicator:checked { background: #4a90d9; border: 2px solid #2a70b9; }"
+        )
+
+    def _on_trunk_toggled(self, checked):
+        self.state.dig_trunk_enabled = checked
+        self._trunk_cb.setEnabled(checked)
+        self._apply_trunk_style(checked)
+        self._refresh_cursor_assigned()
+
+    def _refresh_cursor_assigned(self):
+        self._assigned_sensors = {
+            self.state.dig_sensor_right,
+            self.state.dig_sensor_left,
+        }
+        if self.state.dig_trunk_enabled:
+            self._assigned_sensors.add(self.state.dig_sensor_trunk)
+
     def _save_cursor_assign(self, side, cb):
         if side == 'right':
             self.state.dig_sensor_right = cb.currentData()
-        else:
+        elif side == 'left':
             self.state.dig_sensor_left = cb.currentData()
+        else:
+            self.state.dig_sensor_trunk = cb.currentData()
         self.state.save_config()
         self._refresh_assigned()
 

@@ -1,8 +1,8 @@
 {
-  "WORKSPACE_Y_MIN": 20.85495339259112,
-  "WORKSPACE_Y_MAX": 131.5450466074089,
-  "WORKSPACE_Z_MIN": 26.63682256666501,
-  "WORKSPACE_Z_MAX": 88.9,
+  "WORKSPACE_Y_MIN": -6.817569911113324,
+  "WORKSPACE_Y_MAX": 159.21756991111334,
+  "WORKSPACE_Z_MIN": 0.7526169249987547,
+  "WORKSPACE_Z_MAX": 94.14738307500124,
   "env_mon_size": 50.0,
   "env_mon_unit": "in",
   "env_mon_ratio_idx": 0,
@@ -18,6 +18,20 @@
       "env_rect_y": 26.63682256666501,
       "env_rect_w": 110.69009321481776,
       "env_rect_h": 62.263177433334995
+    },
+    "workspace": {
+      "env_rect_x": -6.817569911113324,
+      "env_rect_y": -0.24738307500124534,
+      "env_rect_w": 166.03513982222665,
+      "env_rect_h": 93.3947661500025
+    },
+    "workspace2": {
+      "env_rect_x": -6.817569911113324,
+      "env_rect_y": 0.7526169249987547,
+      "env_rect_w": 166.03513982222665,
+      "env_rect_h": 93.3947661500025
     }
-  }
+  },
+  "ws2_sweep_speed": 10.0,
+  "ws2_show_split_stats": false
 }

@@ -286,6 +286,14 @@ class MenuScreen(QWidget):
 
         root.addLayout(bottom_row)
 
+    def showEvent(self, e):
+        if not hasattr(self, '_dummy_synced'):
+            self._dummy_synced = True
+            if self.state.task_type == 'workspace2' and not self.toggle.isOn():
+                self.toggle.setOn(True)
+                self._on_toggle(True)
+        super().showEvent(e)
+
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:
             for win in self.mw.game_windows.values():
@@ -301,10 +309,17 @@ class MenuScreen(QWidget):
         for attr in ('env_rect_x', 'env_rect_y', 'env_rect_w', 'env_rect_h'):
             setattr(self.state, attr, None)
         self.state.load_task_rect(key, fallback=False)
-        # turn off dummy mode so the new task starts clean
-        if self.toggle.isOn():
-            self.toggle.setOn(False)
-            self._on_toggle(False)
+        # trunk sensor enabled by default only for workspace2
+        self.state.dig_trunk_enabled = (key == 'workspace2')
+        # dummy mode always on for workspace2, off for other tasks
+        if key == 'workspace2':
+            if not self.toggle.isOn():
+                self.toggle.setOn(True)
+                self._on_toggle(True)
+        else:
+            if self.toggle.isOn():
+                self.toggle.setOn(False)
+                self._on_toggle(False)
         self._update_status()
 
     def _browse_folder(self):
@@ -450,6 +465,8 @@ class MenuScreen(QWidget):
         task = self._current_task()
         has_targets       = getattr(task, 'HAS_TARGETS',       True)  if task else True
         has_game_settings = getattr(task, 'HAS_GAME_SETTINGS', False) if task else False
+        has_sessions      = getattr(task, 'HAS_SESSIONS',      True)  if task else True
+        has_digitization  = getattr(task, 'HAS_DIGITIZATION',  True)  if task else True
         self.task_combo.setEnabled(not locked)
         self.browse_btn.setEnabled(not locked)
         self.rate_spin.setEnabled(not locked)
@@ -459,10 +476,22 @@ class MenuScreen(QWidget):
             if btn is not None:
                 if key == 'targets' and not has_targets:
                     btn.setEnabled(False)
+                elif key == 'sessions' and not has_sessions:
+                    btn.setEnabled(False)
                 elif key == 'game' and not has_game_settings:
+                    btn.setEnabled(False)
+                elif key == 'digitization' and not has_digitization:
                     btn.setEnabled(False)
                 else:
                     btn.setEnabled(not locked)
+
+        # Disable "start from trial" when task has no sessions (e.g. WTS2)
+        if not has_sessions:
+            self.start_from_chk.setChecked(False)
+            self.start_from_chk.setEnabled(False)
+            self.start_from_edit.setEnabled(False)
+        else:
+            self.start_from_chk.setEnabled(not locked)
 
     def _update_status(self):
         game_running = any(w.isVisible() for w in self.mw.game_windows.values())

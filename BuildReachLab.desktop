@@ -1,0 +1,5 @@
+[Desktop Entry]
+Name=Build ReachLab
+Exec=bash -c 'DIR="$(dirname "%k")"; bash "$DIR/build.sh"; echo "Done. Press Enter to close..."; read'
+Type=Application
+Terminal=true

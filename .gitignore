@@ -18,9 +18,16 @@ LbtyUSBDrvPkgInstall*.exe
 # Claude settings
 .claude/
 
+# PyInstaller build output
+dist/
+build/
+*.spec
+
 # Calibration runtime data (user-specific)
 ReachingGame/last_calibration.json
 ReachingGame/config.json
+app/last_calibration.json
+app/config.json
 
 # Calibration output CSVs (raw experiment data)
 calibrated matrix/

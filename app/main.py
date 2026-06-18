@@ -13,10 +13,11 @@ from screens.environment import EnvironmentScreen
 from screens.calibration import CalibrationScreen
 from screens.digitization import DigitizationScreen
 
-import tasks.reaching_task  as reaching_task
-import tasks.workspace_task as workspace_task
+import tasks.reaching_task   as reaching_task
+import tasks.workspace_task  as workspace_task
+import tasks.workspace2_task as workspace2_task
 
-TASKS = [reaching_task, workspace_task]
+TASKS = [workspace2_task, reaching_task, workspace_task]
 
 DUMMY_DATA_DIR = os.path.join(os.path.expanduser('~'), 'Desktop', 'Liberty', 'test')
 
@@ -32,7 +33,6 @@ class GameWindow(QMainWindow):
         target = screens[1] if len(screens) > 1 else screens[0]
         self.setGeometry(target.geometry())
         self.showFullScreen()
-        self.activateWindow()
 
 
 class MainWindow(QMainWindow):
@@ -127,7 +127,6 @@ class MainWindow(QMainWindow):
             self.screens[name].setFocus()
         elif name in self.screens:
             self.show()
-            self.activateWindow()
             self.stack.setCurrentWidget(self.screens[name])
             self.screens[name].setFocus()
 
