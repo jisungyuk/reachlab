@@ -1,10 +1,12 @@
 import math
 import time
 import threading
+from datetime import datetime
 from screens._beep import beep
 from PyQt5.QtWidgets import QWidget
 from PyQt5.QtCore import Qt, QTimer, QRect, QPoint
 from PyQt5.QtGui import QPainter, QColor, QBrush, QFont, QPen
+from tasks.reaching import recorder
 
 
 def _beep(freq, ms):
@@ -60,6 +62,13 @@ class GameScreen(QWidget):
         self._dt        = 0.004
         self._last_tick = time.perf_counter()
 
+        # data recording
+        self._session_dir     = None
+        self._hand_counters   = {}
+        self._samples         = []
+        self._trial_start_t   = 0.0
+        self._last_landmarks  = {}
+
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(4)
@@ -72,6 +81,9 @@ class GameScreen(QWidget):
         self._paused   = False
         self._cursor_y = self.state.WORKSPACE_Y_MAX / 2
         self._cursor_z = self.state.WORKSPACE_Z_MAX / 2
+        self._calib_hand    = self._peek_first_hand()
+        self._session_dir   = None
+        self._hand_counters = {}
 
     def hideEvent(self, e):
         self._timer.stop()
@@ -111,29 +123,81 @@ class GameScreen(QWidget):
         if not self.liberty.use_mouse:
             self._read_sensor()
         if self._phase == 'running' and self._t_state:
+            if not self.liberty.use_mouse:
+                self._record_sample()
             self._update_trial()
         self.update()
 
+    def _current_hand(self):
+        if self._trial is not None:
+            return self._trial['hand']
+        return getattr(self, '_calib_hand', 'right')
+
+    def _peek_first_hand(self):
+        from tasks.reaching_task import SESSIONS_SCREEN
+        s_scr = self.mw.screens.get(SESSIONS_SCREEN)
+        if s_scr and s_scr.table.rowCount() > 0:
+            item = s_scr.table.item(0, 1)
+            if item and item.text().strip() == '2':
+                return 'left'
+        return 'right'
+
     def _read_sensor(self):
-        from digitizer import track_mcp
-        st = self.state
-        if st.dig_mode >= 1 and st.mcp_offset_right is not None:
-            s = self.liberty.get_sensor(st.dig_sensor_right)
+        st   = self.state
+        hand = self._current_hand()
+        landmarks = recorder.live_landmarks(st, self.liberty, hand)
+        mcp = landmarks.get('mcp')
+        if mcp is None:
+            sensor_n = st.dig_sensor_right if hand == 'right' else st.dig_sensor_left
+            s = self.liberty.get_sensor(sensor_n)
             if s is None:
                 return
-            pos = track_mcp(s, st.mcp_offset_right)
-            y = pos[1] - st.sensor_y_offset
-            z = pos[2] - st.sensor_z_offset
-        else:
-            s = self.liberty.get_sensor(st.dig_sensor_right)
-            if s is None:
-                return
-            y = s.y * 2.54 - st.sensor_y_offset
-            z = s.z * 2.54 - st.sensor_z_offset
+            mcp = [s.x * 2.54, s.y * 2.54, s.z * 2.54]
+        y = mcp[1] - st.sensor_y_offset
+        z = mcp[2] - st.sensor_z_offset
         self._cursor_in_ws = (st.WORKSPACE_Y_MIN <= y <= st.WORKSPACE_Y_MAX and
                               st.WORKSPACE_Z_MIN <= z <= st.WORKSPACE_Z_MAX)
         self._cursor_y = max(st.WORKSPACE_Y_MIN, min(st.WORKSPACE_Y_MAX, y))
         self._cursor_z = max(st.WORKSPACE_Z_MIN, min(st.WORKSPACE_Z_MAX, z))
+        self._last_landmarks = {
+            lm: [pos[0] - st.sensor_x_offset, pos[1] - st.sensor_y_offset, pos[2] - st.sensor_z_offset]
+            for lm, pos in landmarks.items()
+        }
+
+    def _record_sample(self):
+        t_ms = (time.perf_counter() - self._trial_start_t) * 1000.0
+        self._samples.append((
+            t_ms, self._t_state, self._cursor_y, self._cursor_z,
+            dict(self._last_landmarks),
+        ))
+
+    def _write_trial_file(self):
+        if self._session_dir is None:
+            self._session_dir = recorder.ensure_session_dir(self.state)
+        t    = self._trial
+        hand = t['hand']
+        idx  = self._hand_counters.get(hand, 0)
+        self._hand_counters[hand] = idx + 1
+        now  = datetime.now()
+        meta = {
+            'date':             now.strftime('%m/%d/%Y'),
+            'time':             now.strftime('%H:%M:%S'),
+            'participant_id':   self.state.participant_id or '',
+            'hand':             hand,
+            'target_id':        t['target_id'],
+            'target_angle_deg': t['target_angle_deg'],
+            'target_dist_cm':   t['target_dist_cm'],
+            'target_diam_cm':   t['target_diam_cm'],
+            'hold_s':           t['hold_s'],
+            'wait_s':           t['wait_s'],
+            'move_s':           t['move_s'],
+            'instruction':      t['instruction'],
+            'dig_mode':         self.state.dig_mode,
+            'home_y_cm':        self._home_y,
+            'home_z_cm':        self._home_z,
+            'outcome':          'GOOD' if self._outcome_good else 'BAD',
+        }
+        recorder.write_trial(self._session_dir, hand, idx, meta, self._samples)
 
     # ------------------------------------------------------------------ calibration
 
@@ -166,6 +230,7 @@ class GameScreen(QWidget):
 
         self._trials = []
         for r in range(s_scr.table.rowCount()):
+            hand   = 'left' if s_scr.table.item(r, 1).text().strip() == '2' else 'right'
             tid    = s_scr.table.item(r, 2).text().strip()
             hold_s = float(s_scr.table.item(r, 3).text())
             wait_s = float(s_scr.table.item(r, 4).text())
@@ -181,6 +246,11 @@ class GameScreen(QWidget):
             tz  = self._home_z + dist_cm * math.sin(rad)
 
             self._trials.append({
+                'hand':             hand,
+                'target_id':        tid,
+                'target_angle_deg': angle_deg,
+                'target_dist_cm':   dist_cm,
+                'target_diam_cm':   diam_cm,
                 'target_y':    ty,
                 'target_z':    tz,
                 'target_r':    diam_cm / 2,
@@ -207,6 +277,8 @@ class GameScreen(QWidget):
         self._go_cue_elapsed   = 0.0
         self._last_cursor_y    = self._cursor_y
         self._last_cursor_z    = self._cursor_z
+        self._samples          = []
+        self._trial_start_t    = time.perf_counter()
 
     def _in_zone(self, cy, cz, zy, zz, r):
         return (cy - zy) ** 2 + (cz - zz) ** 2 <= r ** 2
@@ -259,6 +331,8 @@ class GameScreen(QWidget):
         elif self._t_state == 'Feedback':
             self._feedback_elapsed += self._dt
             if self._feedback_elapsed >= 1.0:
+                if not self.liberty.use_mouse:
+                    self._write_trial_file()
                 self._start_next_trial()
 
     # ------------------------------------------------------------------ coordinates

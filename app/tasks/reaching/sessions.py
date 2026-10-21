@@ -64,6 +64,10 @@ class SessionScreen(QWidget):
 
         self.table = QTableWidget(0, NUM_COLS)
         self.table.setHorizontalHeaderLabels(COLUMNS)
+        self.table.horizontalHeaderItem(COLUMNS.index('Instruction')).setToolTip(
+            "0: Rest\n1: Reaching")
+        self.table.horizontalHeaderItem(COLUMNS.index('Hand')).setToolTip(
+            "1: Right\n2: Left")
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
