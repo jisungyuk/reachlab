@@ -359,3 +359,26 @@
 - Both `tasks/reaching/game.py` and `tasks/workspace/game.py` had no `hideEvent`
 - QTimer kept firing after returning to menu → continued beeping based on sensor position
 - Added `hideEvent` to both game screens: stops timer on hide, `showEvent` restarts it
+
+---
+
+## 2026-10-22
+
+### Reaching Trial CSV — Shared Output Format (format_version 1)
+Trial files now follow the shared LeapDex/ReachLab format defined in KinematicToolBox `DATA_FORMAT.md`. Internal names are unchanged; only `recorder.py` / `_write_trial_file` changed.
+
+- Layout: `<participant>/session_NNN_YYYYMMDD/01|02/0001.csv` (was `session_YYYYMMDD_HHMMSS/01/trial_0000.csv`)
+- Trial number = session table row (1-based), shared by both hands; every trial writes both `01` (right) and `02` (left). The unused hand's file keeps `t_ms`/`state` with blank coordinates.
+- Axes converted on output only (`recorder.to_output_axes`): Liberty x=up, y=right, z=forward -> output x=right, y=up, z=forward. Verified on session_20261021_174350 (medial/lateral targets, shoulder height, forearm chirality). Linux reader path only; re-check if run through the Windows PDI SDK.
+- Fixed 33 columns: `t_ms,state,ttl` + idx/thb/mcp/wrist(+lateral/medial)/elbow(+lateral/medial)/shoulder xyz. `cursor_y/z` dropped (identical to mcp). Unmeasured joints and `ttl` are blank.
+- Header: common keys (`format_version`, `system`, ISO `date`, `session_index`, `trial_index`, `used_hand`, `this_file_hand`, `start_pos_cm`, `start_radius_cm`, `target_pos_cm`, `target_radius_cm`, `feedback_s`, `ready_ms`, `go_ms`, `axes`, `origin`, ...) + extras `dig_mode`, `target_angle_deg`, `target_dist_cm`
+- `ready_ms` / `go_ms`: last ShowDirection / Executing entry, ms from trial start
+- Start/target height = MCP Liberty x at calibration confirm (`_home_x`)
+- UTF-8 without BOM, `\n` line endings, 3 decimals for t_ms and positions
+- `FEEDBACK_S` constant replaces the hard-coded 1.0 s feedback time
+
+### Reaching — Start from Trial
+- Menu "Start from trial N" was only wired to the workspace task; the reaching game ignored `state.start_trial`
+- Each built trial now carries `row` (1-based session table row); calibration confirm jumps to the first trial with `row >= start_trial`
+- Calibration screen hand (`_peek_first_hand`) uses the start row's hand
+- Output `trial_index` / file name = `row`, so a restarted run continues the numbering (e.g. `0050.csv`) in a new session folder

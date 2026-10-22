@@ -20,6 +20,7 @@ def _beep_seq(*pairs):
 
 
 HOME_RADIUS_CM = 3.0   # 3 cm home zone
+FEEDBACK_S     = 1.0   # GOOD/BAD display time
 
 
 class GameScreen(QWidget):
@@ -41,6 +42,7 @@ class GameScreen(QWidget):
         self._cursor_in_ws = True
 
         self._phase   = 'calibration'
+        self._home_x  = None   # MCP height at calibration (Liberty x), recorded only
         self._home_y  = 0.0
         self._home_z  = 0.0
         self._trials  = []
@@ -57,6 +59,8 @@ class GameScreen(QWidget):
         self._go_cue_elapsed   = 0.0
         self._last_cursor_y    = 0.0
         self._last_cursor_z    = 0.0
+        self._ready_ms         = None   # last ShowDirection entry, ms from trial start
+        self._go_ms            = None   # last Executing entry, ms from trial start
 
         self._paused    = False
         self._dt        = 0.004
@@ -64,7 +68,7 @@ class GameScreen(QWidget):
 
         # data recording
         self._session_dir     = None
-        self._hand_counters   = {}
+        self._session_index   = None
         self._samples         = []
         self._trial_start_t   = 0.0
         self._last_landmarks  = {}
@@ -83,7 +87,7 @@ class GameScreen(QWidget):
         self._cursor_z = self.state.WORKSPACE_Z_MAX / 2
         self._calib_hand    = self._peek_first_hand()
         self._session_dir   = None
-        self._hand_counters = {}
+        self._session_index = None
 
     def hideEvent(self, e):
         self._timer.stop()
@@ -137,7 +141,8 @@ class GameScreen(QWidget):
         from tasks.reaching_task import SESSIONS_SCREEN
         s_scr = self.mw.screens.get(SESSIONS_SCREEN)
         if s_scr and s_scr.table.rowCount() > 0:
-            item = s_scr.table.item(0, 1)
+            row  = max(0, min(self.state.start_trial - 1, s_scr.table.rowCount() - 1))
+            item = s_scr.table.item(row, 1)
             if item and item.text().strip() == '2':
                 return 'left'
         return 'right'
@@ -164,8 +169,11 @@ class GameScreen(QWidget):
             for lm, pos in landmarks.items()
         }
 
+    def _trial_ms(self):
+        return (time.perf_counter() - self._trial_start_t) * 1000.0
+
     def _record_sample(self):
-        t_ms = (time.perf_counter() - self._trial_start_t) * 1000.0
+        t_ms = self._trial_ms()
         self._samples.append((
             t_ms, self._t_state, self._cursor_y, self._cursor_z,
             dict(self._last_landmarks),
@@ -173,42 +181,60 @@ class GameScreen(QWidget):
 
     def _write_trial_file(self):
         if self._session_dir is None:
-            self._session_dir = recorder.ensure_session_dir(self.state)
+            self._session_index, self._session_dir = recorder.ensure_session_dir(self.state)
         t    = self._trial
-        hand = t['hand']
-        idx  = self._hand_counters.get(hand, 0)
-        self._hand_counters[hand] = idx + 1
         now  = datetime.now()
+        # Shared output format: positions in cm, Liberty frame converted by the
+        # recorder (to_output_axes); trial numbers are the session table row,
+        # 1-based, shared by both hands.
+        start_pos  = recorder.to_output_axes([self._home_x, self._home_y, self._home_z])
+        target_pos = recorder.to_output_axes([self._home_x, t['target_y'], t['target_z']])
         meta = {
-            'date':             now.strftime('%m/%d/%Y'),
+            'format_version':   recorder.FORMAT_VERSION,
+            'system':           'reachlab',
+            'date':             now.strftime('%Y-%m-%d'),
             'time':             now.strftime('%H:%M:%S'),
             'participant_id':   self.state.participant_id or '',
-            'hand':             hand,
+            'session_index':    self._session_index,
+            'trial_index':      t['row'],
+            'used_hand':        t['hand'],
+            'instruction':      t['instruction'],
             'target_id':        t['target_id'],
-            'target_angle_deg': t['target_angle_deg'],
-            'target_dist_cm':   t['target_dist_cm'],
-            'target_diam_cm':   t['target_diam_cm'],
+            'start_pos_cm':     start_pos,
+            'start_radius_cm':  HOME_RADIUS_CM,
+            'target_pos_cm':    target_pos,
+            'target_radius_cm': t['target_r'],
             'hold_s':           t['hold_s'],
             'wait_s':           t['wait_s'],
             'move_s':           t['move_s'],
-            'instruction':      t['instruction'],
-            'dig_mode':         self.state.dig_mode,
-            'home_y_cm':        self._home_y,
-            'home_z_cm':        self._home_z,
+            'feedback_s':       FEEDBACK_S,
+            'ready_ms':         self._ready_ms,
+            'go_ms':            self._go_ms,
             'outcome':          'GOOD' if self._outcome_good else 'BAD',
+            'axes':             recorder.AXES,
+            'origin':           recorder.ORIGIN,
+            'dig_mode':         self.state.dig_mode,
+            'target_angle_deg': t['target_angle_deg'],
+            'target_dist_cm':   t['target_dist_cm'],
         }
-        recorder.write_trial(self._session_dir, hand, idx, meta, self._samples)
+        recorder.write_trial(self._session_dir, t['row'], t['hand'], meta, self._samples)
 
     # ------------------------------------------------------------------ calibration
 
     def _confirm_calibration(self):
+        mcp = self._last_landmarks.get('mcp')
+        self._home_x = mcp[0] if mcp else None
         self._home_y = self._cursor_y
         self._home_z = self._cursor_z
         self._build_trials()
         if not self._trials:
             return
         self._phase = 'running'
-        self._trial_idx = -1
+        # "Start from trial N" (menu): skip to the first trial at or after
+        # session table row N. _start_next_trial() advances by one first.
+        first = next((i for i, tr in enumerate(self._trials)
+                      if tr['row'] >= self.state.start_trial), len(self._trials))
+        self._trial_idx = first - 1
         self._start_next_trial()
 
     # ------------------------------------------------------------------ build trials
@@ -246,6 +272,7 @@ class GameScreen(QWidget):
             tz  = self._home_z + dist_cm * math.sin(rad)
 
             self._trials.append({
+                'row':              r + 1,   # 1-based session table row = trial number
                 'hand':             hand,
                 'target_id':        tid,
                 'target_angle_deg': angle_deg,
@@ -277,6 +304,8 @@ class GameScreen(QWidget):
         self._go_cue_elapsed   = 0.0
         self._last_cursor_y    = self._cursor_y
         self._last_cursor_z    = self._cursor_z
+        self._ready_ms         = None
+        self._go_ms            = None
         self._samples          = []
         self._trial_start_t    = time.perf_counter()
 
@@ -302,6 +331,7 @@ class GameScreen(QWidget):
                 if self._hold_elapsed >= t['hold_s']:
                     self._t_state       = 'ShowDirection'
                     self._ready_elapsed = 0.0
+                    self._ready_ms      = self._trial_ms()
 
         elif self._t_state == 'ShowDirection':
             if not self._in_zone(cy, cz, self._home_y, self._home_z, HOME_RADIUS_CM):
@@ -311,6 +341,7 @@ class GameScreen(QWidget):
                 if self._ready_elapsed >= t['wait_s']:
                     self._t_state        = 'Executing'
                     self._exec_elapsed   = 0.0
+                    self._go_ms          = self._trial_ms()
                     self._go_cue_elapsed = 0.0
                     _beep(880, 100)
 
@@ -330,7 +361,7 @@ class GameScreen(QWidget):
 
         elif self._t_state == 'Feedback':
             self._feedback_elapsed += self._dt
-            if self._feedback_elapsed >= 1.0:
+            if self._feedback_elapsed >= FEEDBACK_S:
                 if not self.liberty.use_mouse:
                     self._write_trial_file()
                 self._start_next_trial()
