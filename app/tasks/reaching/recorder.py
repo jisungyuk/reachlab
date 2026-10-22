@@ -54,6 +54,16 @@ def ensure_session_dir(state):
     return latest + 1, session_dir
 
 
+class FrameSensors:
+    """Read-only stand-in for LibertyReader holding one frame's sensors, so
+    live_landmarks() can run on a frame passed to LibertyReader.frame_callback."""
+    def __init__(self, sensors):
+        self._sensors = sensors
+
+    def get_sensor(self, n):
+        return self._sensors.get(n)
+
+
 def _midpoint(a, b):
     if a is None or b is None:
         return None

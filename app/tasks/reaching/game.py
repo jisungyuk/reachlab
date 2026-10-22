@@ -66,10 +66,13 @@ class GameScreen(QWidget):
         self._dt        = 0.004
         self._last_tick = time.perf_counter()
 
-        # data recording
+        # data recording — one sample per Liberty frame, taken on the reader thread
+        # (_on_liberty_frame), so the recorded rate is the device rate and not this
+        # screen's QTimer. _samples_lock guards _samples / _trial_start_t.
         self._session_dir     = None
         self._session_index   = None
         self._samples         = []
+        self._samples_lock    = threading.Lock()
         self._trial_start_t   = 0.0
         self._last_landmarks  = {}
 
@@ -88,10 +91,12 @@ class GameScreen(QWidget):
         self._calib_hand    = self._peek_first_hand()
         self._session_dir   = None
         self._session_index = None
+        self.liberty.frame_callback = self._on_liberty_frame
 
     def hideEvent(self, e):
         self._timer.stop()
         self._paused = False
+        self.liberty.frame_callback = None
 
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:
@@ -127,8 +132,6 @@ class GameScreen(QWidget):
         if not self.liberty.use_mouse:
             self._read_sensor()
         if self._phase == 'running' and self._t_state:
-            if not self.liberty.use_mouse:
-                self._record_sample()
             self._update_trial()
         self.update()
 
@@ -172,12 +175,25 @@ class GameScreen(QWidget):
     def _trial_ms(self):
         return (time.perf_counter() - self._trial_start_t) * 1000.0
 
-    def _record_sample(self):
-        t_ms = self._trial_ms()
-        self._samples.append((
-            t_ms, self._t_state, self._cursor_y, self._cursor_z,
-            dict(self._last_landmarks),
-        ))
+    def _on_liberty_frame(self, frame_time, sensors):
+        """LibertyReader.frame_callback — runs on the reader thread once per Liberty
+        frame. Records the frame with the trial state at that moment; skips frames
+        while paused, between trials, or in mouse (testing) mode."""
+        trial, state = self._trial, self._t_state
+        if (self.liberty.use_mouse or self._paused or self._phase != 'running'
+                or trial is None or not state):
+            return
+        st = self.state
+        landmarks = recorder.live_landmarks(st, recorder.FrameSensors(sensors), trial['hand'])
+        landmarks = {
+            lm: [pos[0] - st.sensor_x_offset, pos[1] - st.sensor_y_offset, pos[2] - st.sensor_z_offset]
+            for lm, pos in landmarks.items()
+        }
+        with self._samples_lock:
+            t_ms = (frame_time - self._trial_start_t) * 1000.0
+            if t_ms < 0:
+                return
+            self._samples.append((t_ms, state, None, None, landmarks))
 
     def _write_trial_file(self):
         if self._session_dir is None:
@@ -217,7 +233,9 @@ class GameScreen(QWidget):
             'target_angle_deg': t['target_angle_deg'],
             'target_dist_cm':   t['target_dist_cm'],
         }
-        recorder.write_trial(self._session_dir, t['row'], t['hand'], meta, self._samples)
+        with self._samples_lock:
+            samples = list(self._samples)
+        recorder.write_trial(self._session_dir, t['row'], t['hand'], meta, samples)
 
     # ------------------------------------------------------------------ calibration
 
@@ -306,8 +324,9 @@ class GameScreen(QWidget):
         self._last_cursor_z    = self._cursor_z
         self._ready_ms         = None
         self._go_ms            = None
-        self._samples          = []
-        self._trial_start_t    = time.perf_counter()
+        with self._samples_lock:
+            self._samples       = []
+            self._trial_start_t = time.perf_counter()
 
     def _in_zone(self, cy, cz, zy, zz, r):
         return (cy - zy) ** 2 + (cz - zz) ** 2 <= r ** 2

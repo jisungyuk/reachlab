@@ -72,6 +72,14 @@ class LibertyReader:
         self._packet_times   = deque()
         self._lock           = threading.Lock()
 
+        # Per-frame callback for recording at the device's own rate (not the GUI
+        # timer). Called on the reader thread with (frame_time, {station: SensorData})
+        # once every station of a Liberty frame has arrived. frame_time is
+        # time.perf_counter() at the frame's first station.
+        self.frame_callback  = None
+        self._frame_seen     = set()
+        self._frame_time     = 0.0
+
         # Windows-only state
         self._proc             = None
         self._last_launch_time = 0.0
@@ -198,6 +206,35 @@ class LibertyReader:
         else:
             self._linux_read_loop()
 
+    # ── Shared: store one station update, emit completed frames ──────────────
+
+    def _store_station(self, station, sensor):
+        """Liberty sends one record per active station per frame, in station order.
+        A station that was already seen in the current frame starts the next frame,
+        so the previous one is complete and is passed to frame_callback."""
+        frame = None
+        with self._lock:
+            now = time.perf_counter()
+            if station in self._frame_seen:
+                frame = (self._frame_time, {n: s for n, s in self._sensors.items()})
+                self._frame_seen = set()
+            if not self._frame_seen:
+                self._frame_time = now
+            self._frame_seen.add(station)
+            self._sensors[station] = sensor
+            self._last_data_time        = now
+            self._last_sensor_time[station] = now
+            if station == 1:
+                self._packet_times.append(now)
+                while self._packet_times and now - self._packet_times[0] > 2.0:
+                    self._packet_times.popleft()
+        callback = self.frame_callback
+        if frame is not None and callback is not None:
+            try:
+                callback(*frame)
+            except Exception:
+                pass
+
     # ── Windows read loop (UDP from UnityExport.exe) ──────────────────────────
 
     def _windows_read_loop(self):
@@ -242,15 +279,7 @@ class LibertyReader:
                     x, y, z    = -x, -y, -z
                     qx, qy, qz, qw = struct.unpack_from('<4f', data, idx + 24)
                     az, el, ro = _quat_to_euler(qx, qy, qz, qw)
-                    with self._lock:
-                        self._sensors[station] = SensorData(x, y, z, az, el, ro)
-                        now = time.perf_counter()
-                        self._last_data_time = now
-                        self._last_sensor_time[station] = now
-                        if station == 1:
-                            self._packet_times.append(now)
-                            while self._packet_times and now - self._packet_times[0] > 2.0:
-                                self._packet_times.popleft()
+                    self._store_station(station, SensorData(x, y, z, az, el, ro))
             except Exception:
                 pass
             i = idx + 1
@@ -338,14 +367,6 @@ class LibertyReader:
                 return
             x, y, z    = float(parts[0]), float(parts[1]), float(parts[2])
             az, el, ro = float(parts[3]), float(parts[4]), float(parts[5])
-            with self._lock:
-                self._sensors[station] = SensorData(x, y, z, az, el, ro)
-                now = time.perf_counter()
-                self._last_data_time        = now
-                self._last_sensor_time[station] = now
-                if station == 1:
-                    self._packet_times.append(now)
-                    while self._packet_times and now - self._packet_times[0] > 2.0:
-                        self._packet_times.popleft()
+            self._store_station(station, SensorData(x, y, z, az, el, ro))
         except (ValueError, IndexError):
             pass

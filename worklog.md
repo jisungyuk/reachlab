@@ -382,3 +382,9 @@ Trial files now follow the shared LeapDex/ReachLab format defined in KinematicTo
 - Each built trial now carries `row` (1-based session table row); calibration confirm jumps to the first trial with `row >= start_trial`
 - Calibration screen hand (`_peek_first_hand`) uses the start row's hand
 - Output `trial_index` / file name = `row`, so a restarted run continues the numbering (e.g. `0050.csv`) in a new session folder
+
+### Reaching — Record One Sample per Liberty Frame
+- Problem: samples were taken in the GUI QTimer tick (same loop as painting), so the 200 Hz setting gave ~106 Hz with 6–16 ms intervals, and 5–7% of rows repeated the previous sensor value (no new Liberty data between ticks). `t_ms` was the tick time, not the sensor time.
+- `liberty_reader.py`: new `frame_callback`. `_store_station()` (shared by the Linux USB and Windows UDP parsers) groups station records into frames — a station already seen in the current frame starts the next one — and calls `frame_callback(frame_time, {station: SensorData})` on the reader thread. `frame_time` = `perf_counter()` at the frame's first station.
+- `game.py`: `_on_liberty_frame()` is registered in `showEvent` / cleared in `hideEvent`; it computes landmarks from the frame (`recorder.FrameSensors`) and appends one sample with the current trial state. Skips paused, mouse mode, between trials and frames before trial start. `_samples` / `_trial_start_t` guarded by `_samples_lock`. The QTimer still runs the state machine and drawing but no longer records.
+- Tested off-device: ASCII station lines through `_parse_linux_frame` → one callback per complete frame; frame handler with a stubbed screen. Needs a run on the Liberty PC: recorded rate should match the menu's Liberty read rate.
