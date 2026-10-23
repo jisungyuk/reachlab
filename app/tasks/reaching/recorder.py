@@ -36,6 +36,19 @@ def hand_folder(hand):
     return '01' if hand == 'right' else '02'
 
 
+DIG_HAND_NAMES = ('right', 'left', 'both')   # index = state.dig_hand_setup
+
+
+def recorded_hands(state):
+    """Arms recorded on every trial, from the digitization hand setup
+    (0 = Right, 1 = Left, 2 = Both), independent of the hand that plays."""
+    if state.dig_hand_setup == 0:
+        return ['right']
+    if state.dig_hand_setup == 1:
+        return ['left']
+    return ['right', 'left']
+
+
 def ensure_session_dir(state):
     """<data_dir>/<participant>/session_NNN_YYYYMMDD, NNN = next free number
     in that participant folder."""
@@ -150,13 +163,14 @@ def _fmt(v):
     return '' if v is None else f'{v:.3f}'
 
 
-def write_trial(session_dir, trial_index, used_hand, meta, samples):
+def write_trial(session_dir, trial_index, meta, samples):
     """Writes the trial to both hand folders (01 = right, 02 = left), as
-    0001.csv, 0002.csv, ... The file of the hand that was not used keeps
-    t_ms/state but has blank coordinates.
+    0001.csv, 0002.csv, ... Each file takes its own hand's landmarks; a hand
+    that was not recorded (see recorded_hands) keeps t_ms/state but has blank
+    coordinates.
     meta: header keys in output order; this_file_hand is inserted here.
-    samples: list of (t_ms, state, cursor_y, cursor_z, {landmark: [x, y, z]})
-    with landmarks in the Liberty frame."""
+    samples: list of (t_ms, state, cursor_y, cursor_z,
+    {hand: {landmark: [x, y, z]}}) with landmarks in the Liberty frame."""
     for file_hand in ('right', 'left'):
         folder = os.path.join(session_dir, hand_folder(file_hand))
         os.makedirs(folder, exist_ok=True)
@@ -168,17 +182,15 @@ def write_trial(session_dir, trial_index, used_hand, meta, samples):
             if key == 'used_hand':
                 header['this_file_hand'] = file_hand
 
-        is_used = (file_hand == used_hand)
         with open(path, 'w', encoding='utf-8', newline='') as f:
             for key, value in header.items():
                 f.write(f'# {key}: {_format_header_value(value)}\n')
             f.write(','.join(COLUMNS) + '\n')
-            for t_ms, state, _cursor_y, _cursor_z, landmarks in samples:
+            for t_ms, state, _cursor_y, _cursor_z, by_hand in samples:
                 row = {'t_ms': f'{t_ms:.3f}', 'state': state}
-                if is_used:
-                    for lm, pos in landmarks.items():
-                        if lm not in OUTPUT_JOINTS:
-                            continue
-                        for axis, c in zip('xyz', to_output_axes(pos)):
-                            row[f'{lm}_{axis}'] = _fmt(c)
+                for lm, pos in by_hand.get(file_hand, {}).items():
+                    if lm not in OUTPUT_JOINTS:
+                        continue
+                    for axis, c in zip('xyz', to_output_axes(pos)):
+                        row[f'{lm}_{axis}'] = _fmt(c)
                 f.write(','.join(row.get(c, '') for c in COLUMNS) + '\n')

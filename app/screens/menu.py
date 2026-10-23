@@ -400,6 +400,12 @@ class MenuScreen(QWidget):
                 self.state.start_trial = trial_num
             else:
                 self.state.start_trial = 1
+            check = getattr(task, 'check_start', None)
+            if check:
+                problem = check(self.mw, self.state)
+                if problem:
+                    QMessageBox.warning(self, *problem)
+                    return
             if task:
                 self.mw.show_screen(task.GAME_SCREEN)
 

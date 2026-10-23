@@ -177,23 +177,27 @@ class GameScreen(QWidget):
 
     def _on_liberty_frame(self, frame_time, sensors):
         """LibertyReader.frame_callback — runs on the reader thread once per Liberty
-        frame. Records the frame with the trial state at that moment; skips frames
+        frame. Records the frame with the trial state at that moment, for every arm
+        in the digitization hand setup (not only the playing hand); skips frames
         while paused, between trials, or in mouse (testing) mode."""
         trial, state = self._trial, self._t_state
         if (self.liberty.use_mouse or self._paused or self._phase != 'running'
                 or trial is None or not state):
             return
         st = self.state
-        landmarks = recorder.live_landmarks(st, recorder.FrameSensors(sensors), trial['hand'])
-        landmarks = {
-            lm: [pos[0] - st.sensor_x_offset, pos[1] - st.sensor_y_offset, pos[2] - st.sensor_z_offset]
-            for lm, pos in landmarks.items()
-        }
+        frame = recorder.FrameSensors(sensors)
+        by_hand = {}
+        for hand in recorder.recorded_hands(st):
+            landmarks = recorder.live_landmarks(st, frame, hand)
+            by_hand[hand] = {
+                lm: [pos[0] - st.sensor_x_offset, pos[1] - st.sensor_y_offset, pos[2] - st.sensor_z_offset]
+                for lm, pos in landmarks.items()
+            }
         with self._samples_lock:
             t_ms = (frame_time - self._trial_start_t) * 1000.0
             if t_ms < 0:
                 return
-            self._samples.append((t_ms, state, None, None, landmarks))
+            self._samples.append((t_ms, state, None, None, by_hand))
 
     def _write_trial_file(self):
         if self._session_dir is None:
@@ -230,12 +234,13 @@ class GameScreen(QWidget):
             'axes':             recorder.AXES,
             'origin':           recorder.ORIGIN,
             'dig_mode':         self.state.dig_mode,
+            'dig_hand':         recorder.DIG_HAND_NAMES[self.state.dig_hand_setup],
             'target_angle_deg': t['target_angle_deg'],
             'target_dist_cm':   t['target_dist_cm'],
         }
         with self._samples_lock:
             samples = list(self._samples)
-        recorder.write_trial(self._session_dir, t['row'], t['hand'], meta, samples)
+        recorder.write_trial(self._session_dir, t['row'], meta, samples)
 
     # ------------------------------------------------------------------ calibration
 
