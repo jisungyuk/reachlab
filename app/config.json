@@ -1,8 +1,8 @@
 {
-  "WORKSPACE_Y_MIN": -6.817569911113324,
-  "WORKSPACE_Y_MAX": 159.21756991111334,
-  "WORKSPACE_Z_MIN": 0.7526169249987547,
-  "WORKSPACE_Z_MAX": 94.14738307500124,
+  "WORKSPACE_Y_MIN": 20.85495339259112,
+  "WORKSPACE_Y_MAX": 131.5450466074089,
+  "WORKSPACE_Z_MIN": 26.63682256666501,
+  "WORKSPACE_Z_MAX": 88.9,
   "env_mon_size": 50.0,
   "env_mon_unit": "in",
   "env_mon_ratio_idx": 0,
@@ -33,5 +33,6 @@
     }
   },
   "ws2_sweep_speed": 10.0,
-  "ws2_show_split_stats": false
+  "ws2_show_split_stats": false,
+  "ws2_dot_offset": 10.0
 }
